@@ -58,13 +58,12 @@ router.post("/form", authorization, (req, res) => {
         return res.status(400).send({ message: "Parameter missing (GID)." });
     }
     
-    const np = JSON.parse(req.body.employeeNumber);
-    const department = JSON.parse(req.body.department);
-    const experienceLevel = JSON.parse(req.body.expLevel);
-    const role = JSON.parse(req.body.role);
+    console.log(req.body);
+    
+    const { employeeNumber, department, expLevel, role} = req.body;
 
     //Check parameter missing
-    if (!gidUser || !np || !department || !experienceLevel || !role ) {
+    if (!gidUser || !employeeNumber || !department || !expLevel || !role ) {
         return res.status(400).send({ message: "Parameter missing." });
     }
 
@@ -82,7 +81,7 @@ router.post("/form", authorization, (req, res) => {
     
         db.query(
             `INSERT INTO profiles (user_id, department, role, experience_level, np) VALUES (?, ?, ?, ?, ?)`,
-            [idUser, department, role, experienceLevel, np],
+            [idUser, department, role, expLevel, employeeNumber],
             (err) => {
                 if (err) {
                     console.error(err);
