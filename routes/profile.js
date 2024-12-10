@@ -34,7 +34,7 @@ router.get("/profile", authorization, (req, res) => {
         db.query(`SELECT A.np, A.department, A.role, A.experience_level, B.display_name
             FROM profiles AS A
             JOIN users AS B ON A.user_id = B.id
-            WHERE B.id_user = (${db.escape(idUser)});`, (err, result) => {
+            WHERE B.id = (${db.escape(idUser)});`, (err, result) => {
                 if(err) {
                     return res.status(500).send({message: err.sqlMessage});
                 }
