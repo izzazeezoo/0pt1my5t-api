@@ -11,59 +11,68 @@ router.get("/", (req, res) => {
 // ------------------------------------- DASHBOARD
 //GET Profile Data
 router.get("/profile", authorization, (req, res) => {
-	//let gidUser = req.cookies.google_id;
-	let gidUser = req.headers["x-google-id"];
-	console.log("Google ID dari Cookies:", gidUser);
+    let gidUser = req.headers["x-google-id"];
+    console.log("Google ID :", gidUser);
 
-	//Check invalid parameter or parameter missing
-	if (!gidUser) {
-		return res.status(400).send({ message: "Parameter missing." });
-	}
+    // Check for missing parameter
+    if (!gidUser) {
+        return res.status(400).send({ message: "Parameter missing." });
+    }
 
-	db.query(
-		`SELECT id FROM users WHERE google_id = ?`,
-		[gidUser],
-		(err, results) => {
-			if (err) {
-				console.error(err);
-				return res.status(500).json({ error: true, message: "Database error" });
-			}
+    // Fetch user data and check `form_filled` status
+    db.query(
+        `SELECT id, form_filled FROM users WHERE google_id = ?`,
+        [gidUser],
+        (err, results) => {
+            if (err) {
+                console.error(err);
+                return res.status(500).json({ error: true, message: "Database error" });
+            }
 
-			if (results.length === 0) {
-				return res.status(404).json({ error: true, message: "User not found" });
-			}
+            if (results.length === 0) {
+                return res.status(404).json({ error: true, message: "User not found" });
+            }
 
-			const idUser = results[0].id; // Extract the idUser from the query result
+            const { id: idUser, form_filled } = results[0];
 
-			db.query(
-				`SELECT A.np, A.department, A.role, A.experience_level, B.display_name
-            FROM profiles AS A
-            JOIN users AS B ON A.user_id = B.id
-            WHERE B.id_user = (${db.escape(idUser)});`,
-				(err, result) => {
-					if (err) {
-						return res.status(500).send({ message: err.sqlMessage });
-					}
-					if (!result.length) {
-						return res.status(400).send({ message: "No such data exist" });
-					} else {
-						return res.status(200).send({
-							error: false,
-							message: "Retrieve data success",
-							dashboardResult: result[0],
-						});
-					}
-				}
-			);
-		}
-	);
+            // Check if the form has been filled
+            if (form_filled === 0) {
+                return res.status(400).send({
+                    error: true,
+                    message: "Profile form not filled. Please complete your profile.",
+                });
+            }
+
+            // Fetch profile data if form is filled
+            db.query(
+                `SELECT A.np, A.department, A.role, A.experience_level, B.display_name
+                FROM profiles AS A
+                JOIN users AS B ON A.user_id = B.id
+                WHERE B.id = ?`,
+                [idUser],
+                (err, result) => {
+                    if (err) {
+                        return res.status(500).send({ message: err.sqlMessage });
+                    }
+                    if (!result.length) {
+                        return res.status(400).send({ message: "No such data exists" });
+                    } else {
+                        return res.status(200).send({
+                            error: false,
+                            message: "Retrieve data success",
+                            dashboardResult: result[0],
+                        });
+                    }
+                }
+            );
+        }
+    );
 });
 
 //Post profile form
 router.post("/form", authorization, (req, res) => {
-	// let gidUser = req.cookies.google_id;
-	let gidUser = req.headers["x-google-id"]; // Case-insensitive
-	console.log("Google ID dari Cookies:", gidUser);
+	let gidUser = req.headers["x-google-id"]; 
+	console.log("Google ID :", gidUser);
 
 	//Check invalid parameter or parameter missing
 	if (!gidUser) {
@@ -80,39 +89,62 @@ router.post("/form", authorization, (req, res) => {
 	}
 
 	db.query(
-		`SELECT id FROM users WHERE google_id = ?`,
-		[gidUser],
-		(err, results) => {
-			if (err) {
-				console.error(err);
-				return res.status(500).json({ error: true, message: "Database error" });
-			}
-
-			if (results.length === 0) {
-				return res.status(404).json({ error: true, message: "User not found" });
-			}
-
-			const idUser = results[0].id; // Extract the idUser from the query result
-
-			db.query(
-				`INSERT INTO profiles (user_id, department, role, experience_level, np) VALUES (?, ?, ?, ?, ?)`,
-				[idUser, department, role, expLevel, employeeNumber],
-				(err) => {
-					if (err) {
-						console.error(err);
-						return res
-							.status(500)
-							.json({ error: true, message: "Failed to insert profile data" });
-					}
-
-					return res.status(201).json({
-						error: false,
-						message: "Profile data successfully created",
-					});
-				}
-			);
-		}
-	);
+        `SELECT id, form_filled FROM users WHERE google_id = ?`,
+        [gidUser],
+        (err, results) => {
+            if (err) {
+                console.error(err);
+                return res.status(500).json({ error: true, message: "Database error" });
+            }
+    
+            if (results.length === 0) {
+                return res.status(404).json({ error: true, message: "User not found" });
+            }
+    
+            const { id: idUser, form_filled } = results[0]; // Extract idUser and form_filled
+    
+            // Check if the form has already been filled
+            if (form_filled === 1) {
+                return res.status(400).json({
+                    error: true,
+                    message: "You have already filled out this form",
+                });
+            }
+    
+            // Proceed to insert the profile data if the form is not filled
+            db.query(
+                `INSERT INTO profiles (user_id, department, role, experience_level, np) VALUES (?, ?, ?, ?, ?)`,
+                [idUser, department, role, expLevel, employeeNumber],
+                (err) => {
+                    if (err) {
+                        console.error(err);
+                        return res
+                            .status(500)
+                            .json({ error: true, message: "Failed to insert profile data" });
+                    }
+    
+                    // Update the form_filled status to 1 after successful insertion
+                    db.query(
+                        `UPDATE users SET form_filled = 1 WHERE id = ?`,
+                        [idUser],
+                        (err) => {
+                            if (err) {
+                                console.error(err);
+                                return res
+                                    .status(500)
+                                    .json({ error: true, message: "Failed to update form status" });
+                            }
+    
+                            return res.status(201).json({
+                                error: false,
+                                message: "Profile data successfully created",
+                            });
+                        }
+                    );
+                }
+            );
+        }
+    );    
 });
 
 module.exports = router;
