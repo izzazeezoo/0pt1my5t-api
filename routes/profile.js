@@ -47,13 +47,11 @@ router.get("/profile", authorization, (req, res) => {
 					if (!result.length) {
 						return res.status(400).send({ message: "No such data exist" });
 					} else {
-						return res
-							.status(200)
-							.send({
-								error: false,
-								message: "Retrieve data success",
-								dashboardResult: result[0],
-							});
+						return res.status(200).send({
+							error: false,
+							message: "Retrieve data success",
+							dashboardResult: result[0],
+						});
 					}
 				}
 			);
