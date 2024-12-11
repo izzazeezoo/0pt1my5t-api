@@ -16,7 +16,7 @@ router.get("/profile", authorization, (req, res) => {
 
     // Check for missing parameter
     if (!gidUser) {
-        return res.status(400).send({ message: "Parameter missing." });
+        return res.status(400).send({ message: "Parameter missing (GID)." });
     }
 
     // Fetch user data and check `form_filled` status
@@ -55,7 +55,7 @@ router.get("/profile", authorization, (req, res) => {
                         return res.status(500).send({ message: err.sqlMessage });
                     }
                     if (!result.length) {
-                        return res.status(400).send({ message: "No such data exists" });
+                        return res.status(404).send({ message: "No such data exists" });
                     } else {
                         return res.status(200).send({
                             error: false,
@@ -84,7 +84,7 @@ router.post("/form", authorization, (req, res) => {
 	const { employeeNumber, department, expLevel, role } = req.body;
 
 	//Check parameter missing
-	if (!gidUser || !employeeNumber || !department || !expLevel || !role) {
+	if (!employeeNumber || !department || !expLevel || !role) {
 		return res.status(400).send({ message: "Parameter missing." });
 	}
 
