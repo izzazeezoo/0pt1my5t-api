@@ -31,8 +31,8 @@ authRouter.get(
         console.log("Saved name in cookie:", req.user.display_name);
 
         // Save photo in a cookie
-        res.cookie('photo', req.user.photo, {  secure: false });
-        console.log("Saved photo in cookie:", req.user.photo);
+        res.cookie('photo', encodeURIComponent(req.user.photo), { secure: false });
+        console.log("Saved photo in cookie:", encodeURIComponent(req.user.photo));
 
         // Query the database to check `form_filled`
         db.query(
@@ -73,6 +73,14 @@ authRouter.get('/unauthorized', (req, res) => {
         error: true,
         message: 'Unauthorized: Please use your work email address.',
     });*/
+});
+
+authRouter.post('/logout', (req, res) => {
+    res.clearCookie('jwtToken', { path: '/' });
+    res.clearCookie('google_ID', { path: '/' });
+    res.clearCookie('photo', { path: '/' });
+    res.clearCookie('display_name', { path: '/' });
+    res.status(200).send({ message: "Logged out successfully" });
 });
 
 module.exports = authRouter;
