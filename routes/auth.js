@@ -26,6 +26,14 @@ authRouter.get(
         res.cookie('jwtToken', token, { secure: false });
         console.log("Saved generated token in cookies: => " + token);
 
+        // Save display_name in a cookie
+        res.cookie('display_name', req.user.display_name, {  secure: false });
+        console.log("Saved name in cookie:", req.user.display_name);
+
+        // Save photo in a cookie
+        res.cookie('photo', req.user.photo, {  secure: false });
+        console.log("Saved photo in cookie:", req.user.photo);
+
         // Query the database to check `form_filled`
         db.query(
             'SELECT form_filled FROM users WHERE google_id = ?',
