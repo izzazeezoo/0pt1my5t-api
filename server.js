@@ -25,9 +25,13 @@ db.connect((err) => {
 });
 
 
-app.use(cors({
-       credentials: true
-   })
+app.use(
+	cors({
+		origin: `${frontendUrl}`,
+		credentials: true,
+		// allowedHeaders: ["Content-Type", "Authorization"],
+		// methods: ["GET", "POST", "OPTIONS"],
+	})
 );
 app.use(cookieParser());
 app.use(bodyParser.json());

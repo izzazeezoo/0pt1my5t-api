@@ -105,11 +105,11 @@ authRouter.get(
 
                 // Role-based redirection
                 switch (role_id) {
-                    case 1: // Team Member
+                    case 1: // Admin
                         return res.redirect(`${frontendUrl}/dashboard/admin`);
-                    case 2: // Project Manager
+                    case 2: // Team Member
                         return res.redirect(`${frontendUrl}/dashboard/team_member`);
-                    case 3: // Admin
+                    case 3: // Project Manager
                         return res.redirect(`${frontendUrl}/dashboard/project_manager`);
                     default:
                         return res.status(403).send({ error: true, msg: 'Invalid role' });
