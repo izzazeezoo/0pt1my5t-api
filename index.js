@@ -5,6 +5,7 @@ const cookieParser = require("cookie-parser");
 const bodyParser = require("body-parser");
 const db = require("./var/dbConfig");
 const dashboardRouter = require("./routes/dashboard");
+const dashboardPMRouter = require("./routes/dashboardPM");
 
 // intialize app and define the server port
 const app = express();
@@ -42,6 +43,7 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 app.use("/", dashboardRouter);
+app.use("/project_manager", dashboardPMRouter);
 
 // a function to start the server  and listen to the port defined
 const start = async () => {
