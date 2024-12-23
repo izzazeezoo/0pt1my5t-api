@@ -24,7 +24,7 @@ db.connect((err) => {
     console.log('Connected to MySQL database.');
 });
 
-
+const frontendUrl = process.env.FRONTEND_URL;
 app.use(
 	cors({
 		origin: `${frontendUrl}`,
