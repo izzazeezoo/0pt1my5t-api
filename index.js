@@ -19,9 +19,10 @@ db.connect((err) => {
 	console.log("Connected to MySQL database.");
 });
 
+const frontendUrl = process.env.FRONTEND_URL;
 app.use(
 	cors({
-		origin: "http://localhost:3000",
+		origin: `${frontendUrl}`,
 		credentials: true,
 		// allowedHeaders: ["Content-Type", "Authorization"],
 		// methods: ["GET", "POST", "OPTIONS"],
@@ -29,7 +30,7 @@ app.use(
 );
 
 // app.options("*", (req, res) => {
-// 	res.setHeader("Access-Control-Allow-Origin", "http://localhost:3000");
+// 	res.setHeader("Access-Control-Allow-Origin", `${frontendUrl}`);
 // 	res.setHeader("Access-Control-Allow-Credentials", "true");
 // 	res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
 // 	res.setHeader("Access-Control-Allow-Headers", "Content-Type");

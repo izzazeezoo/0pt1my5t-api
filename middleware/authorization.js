@@ -10,6 +10,7 @@ const authorization = (req, res, next) => {
   try {
     let payload = jwt.verify(token, process.env.JWT_SECRET);
     console.log("payload : ", payload);
+    req.user = payload;
     return next();
   } catch (err) {
     if (err.name === 'TokenExpiredError') {
@@ -19,4 +20,31 @@ const authorization = (req, res, next) => {
   }
 };
 
-module.exports = authorization;
+// Role-specific middleware for Project Managers
+const authorizePM = (req, res, next) => {
+  authorization(req, res, () => {
+    if (req.user.role !== 3) { //project_manager
+      return res.status(403).json({
+        message: "Access denied: Project Manager role required",
+      });
+    }
+    next();
+  });
+};
+
+// Role-specific middleware for Admins
+const authorizeAdmin = (req, res, next) => {
+  authorization(req, res, () => {
+    if (req.user.role !== 1) { //admin
+      return res.status(403).json({
+        message: "Access denied: Admin role required",
+      });
+    }
+    next();
+  });
+};
+
+// Export all middleware functions
+module.exports = {
+  authorization, authorizePM, authorizeAdmin,
+};
