@@ -3,153 +3,118 @@ const express = require("express");
 const router = express.Router();
 const { authorization, authorizePM, authorizeAdmin } = require("../middleware/authorization");
 const frontendUrl = process.env.FRONTEND_URL;
+const { verifyUserGID, verifyCoPMRole } = require("../middleware/verification");
 
 //GET Dashboard (PM) Data
-router.get("/dashboard", authorizePM, (req, res) => {
-    let gidUser = req.headers["x-google-id"];
+router.get("/dashboard", authorizePM, verifyUserGID, (req, res) => {
+    const { id: idUser } = req.user;
 
-    // Check for missing parameter
-    if (!gidUser) {
-        return res.status(400).send({ message: "Parameter missing (GID)." });
-    }
-
-    // Fetch user data and check if the user exists
+    // Fetch all projects where the user is a Project Manager
     db.query(
-        `SELECT id FROM users WHERE google_id = ?`,
-        [gidUser],
-        (err, results) => {
-            if (err) {
-                console.error(err);
-                return res.status(500).json({ error: true, message: "Database error" });
-            }
-
-            if (results.length === 0) {
-                return res.status(404).json({ error: true, message: "User not found" });
-            }
-
-            const { id: idUser } = results[0];
-
-            // Fetch all projects where the user is a Project Manager
-            db.query(
-                `
+        `
     SELECT 
         p.id AS project_id, p.project_name, p.project_description, p.contract_num, 
-        p.contract_value, p.status, t.team_name,
+        p.contract_value, p.status, t.team_name
         GROUP_CONCAT(CONCAT(u.display_name, ' (', tm.role, ')') SEPARATOR ', ') AS team_members
     FROM 
         projects p
-    JOIN 
+    LEFT JOIN 
         teams t ON p.id = t.project_id
-    JOIN 
+    LEFT JOIN 
         team_members tm ON t.id = tm.team_id
-    JOIN 
+    LEFT JOIN 
         users u ON tm.user_id = u.id
     WHERE 
         p.pm_id = ?
     GROUP BY 
         p.id, t.id;
     `,
-                [idUser],
-                (err, result) => {
-                    if (err) {
-                        console.error(err);
-                        return res.status(500).send({ message: "Database error" });
-                    }
-                    if (!result.length) {
-                        return res.status(404).send({ message: "No projects found for this user" });
-                    } else {
-                        return res.status(200).send({
-                            error: false,
-                            message: "Retrieve data success",
-                            projects: result, // Array of project cards
-                        });
-                    }
-                }
-            );
+        [idUser],
+        (err, result) => {
+            if (err) {
+                console.error(err);
+                return res.status(500).send({ message: "Database error" });
+            }
+            if (!result.length) {
+                return res.status(404).send({ message: "No projects found for this user" });
+            } else {
+                return res.status(200).send({
+                    error: false,
+                    message: "Retrieve data success",
+                    projects: result,
+                });
+            }
         }
     );
 });
 
 // POST Route to Create a New Project
-router.post("/project", authorizePM, (req, res) => {
-    const gidUser = req.headers["x-google-id"];
+router.post("/project", authorizePM, verifyUserGID, async (req, res) => {
+    const { id: pm_id } = req.user;
     const { project_name, project_description, co_pm_id, contract_num, contract_value } = req.body;
-
-    // Check for missing parameter
-    if (!gidUser) {
-        return res.status(400).send({ message: "Parameter missing (GID)." });
-    }
 
     // Validate input fields
     if (!project_name || !project_description || !contract_num || !contract_value) {
         return res.status(400).send({ message: "Missing required fields." });
     }
 
-    // Fetch user data and check if the user exists
-    db.query(
-        `SELECT id FROM users WHERE google_id = ?`,
-        [gidUser],
-        (err, results) => {
-            if (err) {
-                console.error(err);
-                return res.status(500).json({ error: true, message: "Database error" });
-            }
+    try {
+        // If co_pm_id is provided, verify their role
+        if (co_pm_id) {
+            const isCoPMAuthorized = await verifyCoPMRole(co_pm_id);
 
-            if (results.length === 0) {
-                return res.status(404).json({ error: true, message: "User not found" });
-            }
-
-            const { id: pm_id } = results[0];
-
-            // If co_pm_id is provided, verify their role
-            if (co_pm_id) {
-                db.query(
-                    `SELECT role_id FROM users WHERE id = ?`,
-                    [co_pm_id],
-                    (err, coPmResults) => {
-                        if (err) {
-                            console.error(err);
-                            return res.status(500).send({ message: "Database error while verifying co_pm_id" });
-                        }
-
-                        if (coPmResults.length === 0 || coPmResults[0].role_id !== 3 ) { //project manager
-                            return res.status(403).send({ message: "co_pm_id is not authorized as a project manager." });
-                        }
-
-                        // Proceed to create the project
-                        insertProject(pm_id);
-                    }
-                );
-            } else {
-                // Proceed to create the project if no co_pm_id is provided
-                insertProject(pm_id);
-            }
-
-            // Function to insert the project
-            function insertProject(pm_id) {
-                db.query(
-                    `INSERT INTO projects (project_name, project_description, pm_id, co_pm_id, contract_num, contract_value, status) 
-                    VALUES (?, ?, ?, ?, ?, ?, 'Project Initiation')`,
-                    [project_name, project_description, pm_id, co_pm_id, contract_num, contract_value],
-                    (err, result) => {
-                        if (err) {
-                            console.error(err);
-                            return res.status(500).send({ message: "Database insertion error" });
-                        }
-
-                        // Redirect to the created project's page
-                        const projectId = result.insertId; // Get the ID of the newly inserted project
-                        return res.status(201).send({
-                            message: "Project created successfully.",
-                            redirect: `${frontendUrl}/dashboard/project/${projectId}`,
-                            project_id: projectId
-                        });
-                    }
-                );
+            if (!isCoPMAuthorized) {
+                return res.status(403).send({ message: "co_pm_id is not authorized as a project manager." });
             }
         }
-    );
+
+        // Proceed to create the project and team
+        const { projectId, teamId } = await createProjectAndTeam(project_name, project_description, pm_id, co_pm_id, contract_num, contract_value);
+
+        return res.status(201).send({
+            message: "Project and Team created successfully.",
+            redirect: `${frontendUrl}/dashboard/project/${projectId}`,
+            project_id: projectId,
+            team_id: teamId,
+            team_name: `Team ${project_name}`,
+        });
+        
+    } catch (err) {
+        console.error(err);
+        return res.status(500).send({ message: "Internal server error." });
+    }
 });
+
+// Function to insert the project and create the team
+async function createProjectAndTeam(project_name, project_description, pm_id, co_pm_id, contract_num, contract_value) {
+    return new Promise((resolve, reject) => {
+        // Insert the project
+        db.query(
+            `INSERT INTO projects (project_name, project_description, pm_id, co_pm_id, contract_num, contract_value, status) 
+             VALUES (?, ?, ?, ?, ?, ?, 'Project Initiation')`,
+            [project_name, project_description, pm_id, co_pm_id, contract_num, contract_value],
+            (err, result) => {
+                if (err) {
+                    return reject(new Error("Database insertion error"));
+                }
+
+                const projectId = result.insertId; // Get the ID of the newly inserted project
+                const team_name = `Team ${project_name}`;
+
+                // Now insert the team for this project
+                db.query(
+                    `INSERT INTO teams (team_name, project_id) VALUES (?, ?)`,
+                    [team_name, projectId],
+                    (err) => {
+                        if (err) {
+                            return reject(new Error("Database error while creating team"));
+                        }
+                        resolve({ projectId, team_name });
+                    });
+            });
+    });
+}
+
 
 // POST Route for Team Member Recommendation
 router.post("/team/find", authorizePM, (req, res) => {
@@ -208,6 +173,7 @@ router.post("/team/assign", authorizePM, (req, res) => {
 
     // Insert each member into the team_members table
     const values = members.map((member) => [team_id, member.user_id, member.role]);
+    console.log(values);
     db.query(
         `INSERT INTO team_members (team_id, user_id, role) VALUES ?`,
         [values],
