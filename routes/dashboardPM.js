@@ -17,7 +17,7 @@ router.get("/dashboard", authorizePM, verifyUserGID, (req, res) => {
 	db.query(
 		`
     SELECT 
-        p.id AS project_id, p.project_name, p.project_description, p.contract_num, 
+        p.id AS project_id, p.project_name, p.project_description, p.pm_id, p.co_pm_id, p.contract_num, 
         p.contract_value, p.status, t.team_name, t.id AS team_id,
         GROUP_CONCAT(CONCAT(u.display_name, ' (', tm.role, ')') SEPARATOR ', ') AS team_members
     FROM 
@@ -155,6 +155,78 @@ async function createProjectAndTeam(
 		);
 	});
 }
+
+// POST Route to Create a New Project
+router.post("/project/edit", authorizePM, verifyUserGID, async (req, res) => {
+	const { id: pm_id } = req.user;
+	const {
+		project_name,
+		project_description,
+		co_pm_id,
+		contract_num,
+		contract_value,
+		project_status,
+		project_id,
+	} = req.body;
+
+	// Validate input fields
+	if (
+		!project_name ||
+		!project_description ||
+		!contract_num ||
+		!contract_value ||
+		!typeof pm_id === String
+	) {
+		return res.status(400).send({ message: "Missing required fields." });
+	}
+
+	try {
+		// If co_pm_id is provided, verify their role
+		if (co_pm_id) {
+			const isCoPMAuthorized = await verifyCoPMRole(co_pm_id);
+
+			if (!isCoPMAuthorized) {
+				return res.status(403).send({
+					message: "co_pm_id is not authorized as a project manager.",
+				});
+			}
+		}
+
+		db.query(
+			`UPDATE projects SET 
+            project_name, 
+            project_description, 
+            pm_id, co_pm_id, 
+            contract_num, 
+            contract_value,
+            status 
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            WHERE project_id = ?`,
+			[
+				project_name,
+				project_description,
+				pm_id,
+				co_pm_id,
+				contract_num,
+				contract_value,
+				project_status,
+				project_id,
+			]
+		);
+
+		return res.status(201).send({
+			message: "Project updated successfully.",
+			// redirect: `${frontendUrl}/dashboard/`,
+			// redirect: `${frontendUrl}/dashboard/project/${project_id}`,
+			// project_id: projectId,
+			// team_id: teamId,
+			// team_name: `Team ${project_name}`,
+		});
+	} catch (err) {
+		console.error(err);
+		return res.status(500).send({ message: "Internal server error." });
+	}
+});
 
 // POST Route for Team Member Recommendation
 router.post("/team/find", authorizePM, (req, res) => {
