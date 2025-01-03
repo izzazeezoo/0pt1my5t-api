@@ -28,6 +28,26 @@ router.get("/dashboard", authorizePM, verifyUserGID, (req, res) => {
         p.pm_id = ?
     GROUP BY 
         p.id, t.id;
+    SELECT 
+        p.id AS project_id, p.project_name, p.project_description, p.contract_num, 
+        p.contract_value, p.status, t.team_name,    pm.display_name AS pm_name,     co_pm.display_name AS co_pm_name,  
+        GROUP_CONCAT(CONCAT(u.display_name, ' (', tm.role, ')') SEPARATOR ', ') AS team_members
+FROM 
+        projects p
+LEFT JOIN 
+        teams t ON p.id = t.project_id
+LEFT JOIN 
+        team_members tm ON t.id = tm.team_id
+LEFT JOIN 
+        users u ON tm.user_id = u.id
+LEFT JOIN 
+        users pm ON p.pm_id = pm.id  -- Join to get the PM's display name
+LEFT JOIN 
+        users co_pm ON p.co_pm_id = co_pm.id  -- Join to get the Co-PM's display name
+WHERE 
+        p.pm_id = 5
+    GROUP BY 
+        p.id, t.id;
     `,
         [idUser],
         (err, result) => {
@@ -160,39 +180,6 @@ router.put("/project/:projectId", authorizePM, verifyUserGID, async (req, res) =
         return res.status(500).send({ message: "Internal server error." });
     }
 });
-
-// PUT Route to Update an Existing Project
-router.put("/project/:id", authorizePM, (req, res) => {
-    const projectId = req.params.id;
-    const { project_name, project_description, pm_id, co_pm_id, contract_num, contract_value, status } = req.body;
-
-    // Validate input fields
-    if (!project_name || !project_description || !contract_num || !contract_value || !pm_id) {
-        return res.status(400).send({ message: "Missing required fields." });
-    }
-
-    // Query to update the project
-    db.query(
-        `UPDATE projects 
-         SET project_name = ?, project_description = ?, pm_id = ?, co_pm_id = ?, contract_num = ?, contract_value = ?, status = ? 
-         WHERE id = ?`,
-        [project_name, project_description, pm_id, co_pm_id, contract_num, contract_value, status || 'Project Initiation', projectId],
-        (err, result) => {
-            if (err) {
-                console.error(err);
-                return res.status(500).send({ message: "Database update error" });
-            }
-
-            // Check if any rows were affected
-            if (result.affectedRows === 0) {
-                return res.status(404).send({ message: "Project not found or no changes made." });
-            }
-
-            res.status(200).send({ message: "Project updated successfully", project_id: projectId });
-        }
-    );
-});
-
 
 // POST Route for Team Member Recommendation
 router.post("/team/find", authorizePM, (req, res) => {
