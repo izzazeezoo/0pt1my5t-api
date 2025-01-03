@@ -12,23 +12,7 @@ router.get("/dashboard", authorizePM, verifyUserGID, (req, res) => {
     // Fetch all projects where the user is a Project Manager
     db.query(
         `
-    SELECT 
-        p.id AS project_id, p.project_name, p.project_description, p.contract_num, 
-        p.contract_value, p.status, t.team_name
-        GROUP_CONCAT(CONCAT(u.display_name, ' (', tm.role, ')') SEPARATOR ', ') AS team_members
-    FROM 
-        projects p
-    LEFT JOIN 
-        teams t ON p.id = t.project_id
-    LEFT JOIN 
-        team_members tm ON t.id = tm.team_id
-    LEFT JOIN 
-        users u ON tm.user_id = u.id
-    WHERE 
-        p.pm_id = ?
-    GROUP BY 
-        p.id, t.id;
-    SELECT 
+SELECT 
         p.id AS project_id, p.project_name, p.project_description, p.contract_num, 
         p.contract_value, p.status, t.team_name,    pm.display_name AS pm_name,     co_pm.display_name AS co_pm_name,  
         GROUP_CONCAT(CONCAT(u.display_name, ' (', tm.role, ')') SEPARATOR ', ') AS team_members
@@ -98,7 +82,7 @@ router.post("/project", authorizePM, verifyUserGID, async (req, res) => {
             team_id: teamId,
             team_name: `Team ${project_name}`,
         });
-        
+
     } catch (err) {
         console.error(err);
         return res.status(500).send({ message: "Internal server error." });
@@ -139,7 +123,7 @@ async function createProjectAndTeam(project_name, project_description, pm_id, co
 router.put("/project/:projectId", authorizePM, verifyUserGID, async (req, res) => {
     let project_id = parseInt(req.params.projectId); //ID Project
     const { id: pm_id } = req.user;
-    const { project_name, project_description, co_pm_id, contract_num, contract_value, project_status} = req.body;
+    const { project_name, project_description, co_pm_id, contract_num, contract_value, project_status } = req.body;
 
     // Validate input fields
     if (!project_name || !project_description || !contract_num || !contract_value || !project_status || !project_id) {
@@ -166,12 +150,12 @@ router.put("/project/:projectId", authorizePM, verifyUserGID, async (req, res) =
                     console.error(err);
                     return res.status(500).send({ message: "Database update error" });
                 }
-    
+
                 // Check if any rows were affected
                 if (result.affectedRows === 0) {
                     return res.status(404).send({ message: "Project not found or no changes made." });
                 }
-    
+
                 return res.status(200).send({ message: "Project updated successfully", project_id: project_id });
             }
         );
