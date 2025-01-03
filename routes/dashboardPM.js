@@ -29,7 +29,7 @@ LEFT JOIN
 LEFT JOIN 
         users co_pm ON p.co_pm_id = co_pm.id  -- Join to get the Co-PM's display name
 WHERE 
-        p.pm_id = 5
+        p.pm_id = ?
     GROUP BY 
         p.id, t.id;
     `,
