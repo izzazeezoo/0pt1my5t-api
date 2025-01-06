@@ -166,34 +166,40 @@ router.put("/project/:projectId", authorizePM, verifyUserGID, async (req, res) =
 });
 
 // POST Route for Team Member Recommendation
-router.post("/team/find", authorizePM, (req, res) => {
+router.post("/team/find/:teamId", authorizePM, verifyUserGID, (req, res) => {
+    let team_id = parseInt(req.params.teamId); //ID Team
+    const { id: pm_id } = req.user; // Current user's PM ID
     const { role, required_count } = req.body;
 
-    if (!role || !required_count) {
-        return res.status(400).send({ message: "Role and required count are required." });
+    if (!role || !required_count || !team_id) {
+        return res.status(400).send({ message: "Role, required count, and team ID are required." });
     }
 
-    // Query the database to fetch 2n + 1 matching profiles
+    // To fetch 2n + 1 matching profiles
     db.query(
         `
-    SELECT 
-        u.id,  u.display_name, p.role, p.np, p.experience_level, COUNT(tm.user_id) AS project_count
-    FROM 
-        users u
-    JOIN 
-        profiles p ON u.id = p.user_id
-    LEFT JOIN 
-        team_members tm ON u.id = tm.user_id
-    WHERE 
-        p.role = ?
-    GROUP BY 
-        u.id, p.role, p.np, p.experience_level
-    ORDER BY 
-        project_count ASC, FIELD(p.experience_level, 'Senior', 'Middle', 'Junior') DESC
-    LIMIT ?
-        `
-        ,
-        [role, required_count * 2 + 1],
+        SELECT 
+            u.id, u.display_name, p.role, p.np, p.experience_level, COUNT(tm.user_id) AS project_count
+        FROM 
+            users u
+        JOIN 
+            profiles p ON u.id = p.user_id
+        LEFT JOIN 
+            team_members tm ON u.id = tm.user_id
+        WHERE 
+            p.role = ? 
+            AND u.id NOT IN (
+                SELECT user_id 
+                FROM team_members 
+                WHERE team_id = ?
+            ) AND u.id != ?
+        GROUP BY 
+            u.id, p.role, p.np, p.experience_level
+        ORDER BY 
+            project_count ASC, FIELD(p.experience_level, 'Senior', 'Middle', 'Junior') DESC
+        LIMIT ?
+        `,
+        [role, team_id, pm_id, required_count * 2 + 1],
         (err, results) => {
             if (err) {
                 console.error(err);
@@ -216,7 +222,6 @@ router.post("/team/find", authorizePM, (req, res) => {
 router.get("/team/find/allPM", authorizePM, verifyUserGID, (req, res) => {
     const { id: pm_id } = req.user; // Current user's PM ID
 
-    // Query the database to fetch profiles matching the roles
     db.query(
         `
         SELECT 
