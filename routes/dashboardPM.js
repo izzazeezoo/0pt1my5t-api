@@ -157,17 +157,101 @@ async function createProjectAndTeam(
 }
 
 // POST Route to Create a New Project
-<<<<<<< HEAD
-router.post("/project/edit", authorizePM, verifyUserGID, async (req, res) => {
-	const { id: pm_id } = req.user;
+router.put(
+	"/project/:projectId",
+	authorizePM,
+	verifyUserGID,
+	async (req, res) => {
+		let project_id = parseInt(req.params.projectId); //ID Project
+		const { id: pm_id } = req.user;
+		const {
+			project_name,
+			project_description,
+			co_pm_id,
+			contract_num,
+			contract_value,
+			project_status,
+		} = req.body;
+
+		// Validate input fields
+		if (
+			!project_name ||
+			!project_description ||
+			!contract_num ||
+			!contract_value ||
+			!project_status ||
+			!project_id
+		) {
+			return res.status(400).send({ message: "Missing required fields." });
+		}
+
+		try {
+			// If co_pm_id is provided, verify their role
+			if (co_pm_id) {
+				const isCoPMAuthorized = await verifyCoPMRole(co_pm_id);
+
+				if (!isCoPMAuthorized) {
+					return res
+						.status(403)
+						.send({
+							message: "co_pm_id is not authorized as a project manager.",
+						});
+				}
+			}
+
+			db.query(
+				`UPDATE projects 
+             SET project_name = ?, project_description = ?, pm_id = ?, co_pm_id = ?, contract_num = ?, contract_value = ?, status = ? 
+             WHERE id = ?`,
+				[
+					project_name,
+					project_description,
+					pm_id,
+					co_pm_id,
+					contract_num,
+					contract_value,
+					project_status,
+					project_id,
+				],
+				(err, result) => {
+					if (err) {
+						console.error(err);
+						return res.status(500).send({ message: "Database update error" });
+					}
+
+					// Check if any rows were affected
+					if (result.affectedRows === 0) {
+						return res
+							.status(404)
+							.send({ message: "Project not found or no changes made." });
+					}
+
+					return res
+						.status(200)
+						.send({
+							message: "Project updated successfully",
+							project_id: project_id,
+						});
+				}
+			);
+		} catch (err) {
+			console.error(err);
+			return res.status(500).send({ message: "Internal server error." });
+		}
+	}
+);
+
+// PUT Route to Update an Existing Project
+router.put("/project/:id", authorizePM, (req, res) => {
+	const projectId = req.params.id;
 	const {
 		project_name,
 		project_description,
+		pm_id,
 		co_pm_id,
 		contract_num,
 		contract_value,
-		project_status,
-		project_id,
+		status,
 	} = req.body;
 
 	// Validate input fields
@@ -176,137 +260,48 @@ router.post("/project/edit", authorizePM, verifyUserGID, async (req, res) => {
 		!project_description ||
 		!contract_num ||
 		!contract_value ||
-		!typeof pm_id === String
+		!pm_id
 	) {
 		return res.status(400).send({ message: "Missing required fields." });
 	}
 
-	try {
-		// If co_pm_id is provided, verify their role
-		if (co_pm_id) {
-			const isCoPMAuthorized = await verifyCoPMRole(co_pm_id);
-
-			if (!isCoPMAuthorized) {
-				return res.status(403).send({
-					message: "co_pm_id is not authorized as a project manager.",
-				});
-			}
-		}
-
-		db.query(
-			`UPDATE projects SET 
-            project_name, 
-            project_description, 
-            pm_id, co_pm_id, 
-            contract_num, 
-            contract_value,
-            status 
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            WHERE project_id = ?`,
-			[
-				project_name,
-				project_description,
-				pm_id,
-				co_pm_id,
-				contract_num,
-				contract_value,
-				project_status,
-				project_id,
-			]
-		);
-
-		return res.status(201).send({
-			message: "Project updated successfully.",
-			// redirect: `${frontendUrl}/dashboard/`,
-			// redirect: `${frontendUrl}/dashboard/project/${project_id}`,
-			// project_id: projectId,
-			// team_id: teamId,
-			// team_name: `Team ${project_name}`,
-		});
-	} catch (err) {
-		console.error(err);
-		return res.status(500).send({ message: "Internal server error." });
-	}
-});
-=======
-router.put("/project/:projectId", authorizePM, verifyUserGID, async (req, res) => {
-    let project_id = parseInt(req.params.projectId); //ID Project
-    const { id: pm_id } = req.user;
-    const { project_name, project_description, co_pm_id, contract_num, contract_value, project_status} = req.body;
-
-    // Validate input fields
-    if (!project_name || !project_description || !contract_num || !contract_value || !project_status || !project_id) {
-        return res.status(400).send({ message: "Missing required fields." });
-    }
-
-    try {
-        // If co_pm_id is provided, verify their role
-        if (co_pm_id) {
-            const isCoPMAuthorized = await verifyCoPMRole(co_pm_id);
-
-            if (!isCoPMAuthorized) {
-                return res.status(403).send({ message: "co_pm_id is not authorized as a project manager." });
-            }
-        }
-
-        db.query(
-            `UPDATE projects 
-             SET project_name = ?, project_description = ?, pm_id = ?, co_pm_id = ?, contract_num = ?, contract_value = ?, status = ? 
-             WHERE id = ?`,
-            [project_name, project_description, pm_id, co_pm_id, contract_num, contract_value, project_status, project_id],
-            (err, result) => {
-                if (err) {
-                    console.error(err);
-                    return res.status(500).send({ message: "Database update error" });
-                }
-    
-                // Check if any rows were affected
-                if (result.affectedRows === 0) {
-                    return res.status(404).send({ message: "Project not found or no changes made." });
-                }
-    
-                return res.status(200).send({ message: "Project updated successfully", project_id: project_id });
-            }
-        );
-    } catch (err) {
-        console.error(err);
-        return res.status(500).send({ message: "Internal server error." });
-    }
-});
-
-// PUT Route to Update an Existing Project
-router.put("/project/:id", authorizePM, (req, res) => {
-    const projectId = req.params.id;
-    const { project_name, project_description, pm_id, co_pm_id, contract_num, contract_value, status } = req.body;
-
-    // Validate input fields
-    if (!project_name || !project_description || !contract_num || !contract_value || !pm_id) {
-        return res.status(400).send({ message: "Missing required fields." });
-    }
-
-    // Query to update the project
-    db.query(
-        `UPDATE projects 
+	// Query to update the project
+	db.query(
+		`UPDATE projects 
          SET project_name = ?, project_description = ?, pm_id = ?, co_pm_id = ?, contract_num = ?, contract_value = ?, status = ? 
          WHERE id = ?`,
-        [project_name, project_description, pm_id, co_pm_id, contract_num, contract_value, status || 'Project Initiation', projectId],
-        (err, result) => {
-            if (err) {
-                console.error(err);
-                return res.status(500).send({ message: "Database update error" });
-            }
+		[
+			project_name,
+			project_description,
+			pm_id,
+			co_pm_id,
+			contract_num,
+			contract_value,
+			project_status,
+			projectId,
+		],
+		(err, result) => {
+			if (err) {
+				console.error(err);
+				return res.status(500).send({ message: "Database update error" });
+			}
 
-            // Check if any rows were affected
-            if (result.affectedRows === 0) {
-                return res.status(404).send({ message: "Project not found or no changes made." });
-            }
+			// Check if any rows were affected
+			if (result.affectedRows === 0) {
+				return res
+					.status(404)
+					.send({ message: "Project not found or no changes made." });
+			}
 
-            res.status(200).send({ message: "Project updated successfully", project_id: projectId });
-        }
-    );
+			res
+				.status(200)
+				.send({
+					message: "Project updated successfully",
+					project_id: projectId,
+				});
+		}
+	);
 });
-
->>>>>>> c4969128bc5fa5826ac0dcf7ef9ae36cfc1a17fa
 
 // POST Route for Team Member Recommendation
 router.post("/team/find", authorizePM, (req, res) => {
@@ -395,56 +390,74 @@ router.post("/team/assign", authorizePM, (req, res) => {
 	);
 });
 
-<<<<<<< HEAD
-module.exports = router;
-=======
 router.post("/task", authorizePM, (req, res) => {
-    const { task_name, task_description, attachments, due_date, project_id, team_members } = req.body;
+	const {
+		task_name,
+		task_description,
+		attachments,
+		due_date,
+		project_id,
+		team_members,
+	} = req.body;
 
-    // Validate input
-    if (!task_name || !due_date || !project_id || !Array.isArray(team_members) || team_members.length === 0) {
-        return res.status(400).send({ message: "Task name, due date, project ID, and at least one team member are required." });
-    }
+	// Validate input
+	if (
+		!task_name ||
+		!due_date ||
+		!project_id ||
+		!Array.isArray(team_members) ||
+		team_members.length === 0
+	) {
+		return res
+			.status(400)
+			.send({
+				message:
+					"Task name, due date, project ID, and at least one team member are required.",
+			});
+	}
 
-    // Insert task into the database
-    const attachmentLinks = attachments ? JSON.stringify(attachments) : null;
+	// Insert task into the database
+	const attachmentLinks = attachments ? JSON.stringify(attachments) : null;
 
-    console.log(attachmentLinks);
-    console.log(project_id);
+	console.log(attachmentLinks);
+	console.log(project_id);
 
-    db.query(
-        `INSERT INTO tasks (task_name, task_description, attachments, due_date, project_id) VALUES (?, ?, ?, ?, ?)`,
-        [task_name, task_description, attachmentLinks, due_date, project_id],
-        (err, result) => {
-            if (err) {
-                console.error(err);
-                return res.status(500).send({ message: "Database error while inserting task." });
-            }
+	db.query(
+		`INSERT INTO tasks (task_name, task_description, attachments, due_date, project_id) VALUES (?, ?, ?, ?, ?)`,
+		[task_name, task_description, attachmentLinks, due_date, project_id],
+		(err, result) => {
+			if (err) {
+				console.error(err);
+				return res
+					.status(500)
+					.send({ message: "Database error while inserting task." });
+			}
 
-            const taskId = result.insertId;
+			const taskId = result.insertId;
 
-            // Prepare values for task assignments
-            const taskAssignments = team_members.map((userId) => [taskId, userId]);
+			// Prepare values for task assignments
+			const taskAssignments = team_members.map((userId) => [taskId, userId]);
 
-            // Insert task assignments
-            db.query(
-                `INSERT INTO task_assignments (task_id, user_id) VALUES ?`,
-                [taskAssignments],
-                (err) => {
-                    if (err) {
-                        console.error(err);
-                        return res.status(500).send({ message: "Database error while assigning task." });
-                    }
+			// Insert task assignments
+			db.query(
+				`INSERT INTO task_assignments (task_id, user_id) VALUES ?`,
+				[taskAssignments],
+				(err) => {
+					if (err) {
+						console.error(err);
+						return res
+							.status(500)
+							.send({ message: "Database error while assigning task." });
+					}
 
-                    res.status(201).send({
-                        message: "Task assigned successfully.",
-                        assigned_to: team_members,
-                    });
-                }
-            );
-        }
-    );
+					res.status(201).send({
+						message: "Task assigned successfully.",
+						assigned_to: team_members,
+					});
+				}
+			);
+		}
+	);
 });
 
 module.exports = router;
->>>>>>> c4969128bc5fa5826ac0dcf7ef9ae36cfc1a17fa
