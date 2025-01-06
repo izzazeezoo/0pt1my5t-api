@@ -212,6 +212,44 @@ router.post("/team/find", authorizePM, (req, res) => {
     );
 });
 
+// GET Route for Find All PMs
+router.get("/team/find/allPM", authorizePM, verifyUserGID, (req, res) => {
+    const { id: pm_id } = req.user; // Current user's PM ID
+
+    // Query the database to fetch profiles matching the roles
+    db.query(
+        `
+        SELECT 
+            u.id AS user_id, u.display_name
+        FROM 
+            users u
+        JOIN 
+            profiles p ON u.id = p.user_id
+        WHERE 
+            p.role IN ('Project Manager', 'Program Manager') 
+            AND u.id != ?
+        ORDER BY 
+            u.display_name ASC;
+        `,
+        [pm_id], // Exclude the current user
+        (err, results) => {
+            if (err) {
+                console.error(err);
+                return res.status(500).send({ message: "Database error" });
+            }
+
+            if (results.length === 0) {
+                return res.status(404).send({ message: "No Project Managers or Program Managers found." });
+            }
+
+            return res.status(200).send({
+                message: "Project Managers retrieved successfully.",
+                profiles: results,
+            });
+        }
+    );
+});
+
 // POST Route for Assigning Team Members
 router.post("/team/assign", authorizePM, (req, res) => {
     const { team_id, members } = req.body;
