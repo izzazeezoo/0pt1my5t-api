@@ -16,19 +16,23 @@ router.get("/dashboard", authorizePM, verifyUserGID, (req, res) => {
 	// Fetch all projects where the user is a Project Manager
 	db.query(
 		`
-    SELECT 
-        p.id AS project_id, p.project_name, p.project_description, p.pm_id, p.co_pm_id, p.contract_num, 
-        p.contract_value, p.status, t.team_name, t.id AS team_id,
+SELECT 
+        p.id AS project_id, p.project_name, p.project_description, p.contract_num, 
+        p.contract_value, p.status, t.team_name,    pm.display_name AS pm_name,     co_pm.display_name AS co_pm_name,  
         GROUP_CONCAT(CONCAT(u.display_name, ' (', tm.role, ')') SEPARATOR ', ') AS team_members
-    FROM 
+FROM 
         projects p
-    LEFT JOIN 
+LEFT JOIN 
         teams t ON p.id = t.project_id
-    LEFT JOIN 
+LEFT JOIN 
         team_members tm ON t.id = tm.team_id
-    LEFT JOIN 
+LEFT JOIN 
         users u ON tm.user_id = u.id
-    WHERE 
+LEFT JOIN 
+        users pm ON p.pm_id = pm.id  -- Join to get the PM's display name
+LEFT JOIN 
+        users co_pm ON p.co_pm_id = co_pm.id  -- Join to get the Co-PM's display name
+WHERE 
         p.pm_id = ?
     GROUP BY 
         p.id, t.id;
@@ -191,11 +195,9 @@ router.put(
 				const isCoPMAuthorized = await verifyCoPMRole(co_pm_id);
 
 				if (!isCoPMAuthorized) {
-					return res
-						.status(403)
-						.send({
-							message: "co_pm_id is not authorized as a project manager.",
-						});
+					return res.status(403).send({
+						message: "co_pm_id is not authorized as a project manager.",
+					});
 				}
 			}
 
@@ -241,102 +243,44 @@ router.put(
 	}
 );
 
-// PUT Route to Update an Existing Project
-router.put("/project/:id", authorizePM, (req, res) => {
-	const projectId = req.params.id;
-	const {
-		project_name,
-		project_description,
-		pm_id,
-		co_pm_id,
-		contract_num,
-		contract_value,
-		status,
-	} = req.body;
-
-	// Validate input fields
-	if (
-		!project_name ||
-		!project_description ||
-		!contract_num ||
-		!contract_value ||
-		!pm_id
-	) {
-		return res.status(400).send({ message: "Missing required fields." });
-	}
-
-	// Query to update the project
-	db.query(
-		`UPDATE projects 
-         SET project_name = ?, project_description = ?, pm_id = ?, co_pm_id = ?, contract_num = ?, contract_value = ?, status = ? 
-         WHERE id = ?`,
-		[
-			project_name,
-			project_description,
-			pm_id,
-			co_pm_id,
-			contract_num,
-			contract_value,
-			project_status,
-			projectId,
-		],
-		(err, result) => {
-			if (err) {
-				console.error(err);
-				return res.status(500).send({ message: "Database update error" });
-			}
-
-			// Check if any rows were affected
-			if (result.affectedRows === 0) {
-				return res
-					.status(404)
-					.send({ message: "Project not found or no changes made." });
-			}
-
-			res
-				.status(200)
-				.send({
-					message: "Project updated successfully",
-					project_id: projectId,
-				});
-		}
-	);
-});
-
 // POST Route for Team Member Recommendation
-router.post("/team/find", authorizePM, (req, res) => {
+router.post("/team/find/:teamId", authorizePM, verifyUserGID, (req, res) => {
+	let team_id = parseInt(req.params.teamId); //ID Team
+	const { id: pm_id } = req.user; // Current user's PM ID
 	const { role, required_count } = req.body;
 
-	if (!role || !required_count) {
+	if (!role || !required_count || !team_id) {
 		return res
 			.status(400)
-			.send({ message: "Role and required count are required." });
+			.send({ message: "Role, required count, and team ID are required." });
 	}
 
-	console.log("BUTUH", role, required_count);
-
-	// Query the database to fetch 2n + 1 matching profiles
+	// To fetch 2n + 1 matching profiles
 	db.query(
 		`
-    SELECT 
-        u.id,  u.display_name, p.role, p.np, p.experience_level, COUNT(tm.user_id) AS project_count
-    FROM 
-        users u
-    JOIN 
-        profiles p ON u.id = p.user_id
-    LEFT JOIN 
-        team_members tm ON u.id = tm.user_id
-    WHERE 
-        p.role = ?
-    GROUP BY 
-        u.id, p.role, p.np, p.experience_level
-    ORDER BY 
-        project_count ASC, FIELD(p.experience_level, 'Senior', 'Middle', 'Junior') DESC
-    LIMIT ?
+        SELECT 
+            u.id, u.display_name, p.role, p.np, p.experience_level, COUNT(tm.user_id) AS project_count
+        FROM 
+            users u
+        JOIN 
+            profiles p ON u.id = p.user_id
+        LEFT JOIN 
+            team_members tm ON u.id = tm.user_id
+        WHERE 
+            p.role = ? 
+            AND u.id NOT IN (
+                SELECT user_id 
+                FROM team_members 
+                WHERE team_id = ?
+            ) AND u.id != ?
+        GROUP BY 
+            u.id, p.role, p.np, p.experience_level
+        ORDER BY 
+            project_count ASC, FIELD(p.experience_level, 'Senior', 'Middle', 'Junior') DESC
+        LIMIT ?
         `,
-		[role, required_count * 2 + 1],
+		[role, team_id, pm_id, required_count * 2 + 1],
 		(err, results) => {
-			console.log(results);
 			if (err) {
 				console.error(err);
 				return res.status(500).send({ message: "Database error" });
@@ -350,6 +294,45 @@ router.post("/team/find", authorizePM, (req, res) => {
 
 			return res.status(200).send({
 				message: "Profiles retrieved successfully.",
+				profiles: results,
+			});
+		}
+	);
+});
+
+// GET Route for Find All PMs
+router.get("/team/find/allPM", authorizePM, verifyUserGID, (req, res) => {
+	const { id: pm_id } = req.user; // Current user's PM ID
+
+	db.query(
+		`
+        SELECT 
+            u.id AS user_id, u.display_name
+        FROM 
+            users u
+        JOIN 
+            profiles p ON u.id = p.user_id
+        WHERE 
+            p.role IN ('Project Manager', 'Program Manager') 
+            AND u.id != ?
+        ORDER BY 
+            u.display_name ASC;
+        `,
+		[pm_id], // Exclude the current user
+		(err, results) => {
+			if (err) {
+				console.error(err);
+				return res.status(500).send({ message: "Database error" });
+			}
+
+			if (results.length === 0) {
+				return res
+					.status(404)
+					.send({ message: "No Project Managers or Program Managers found." });
+			}
+
+			return res.status(200).send({
+				message: "Project Managers retrieved successfully.",
 				profiles: results,
 			});
 		}
@@ -408,12 +391,10 @@ router.post("/task", authorizePM, (req, res) => {
 		!Array.isArray(team_members) ||
 		team_members.length === 0
 	) {
-		return res
-			.status(400)
-			.send({
-				message:
-					"Task name, due date, project ID, and at least one team member are required.",
-			});
+		return res.status(400).send({
+			message:
+				"Task name, due date, project ID, and at least one team member are required.",
+		});
 	}
 
 	// Insert task into the database
