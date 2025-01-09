@@ -1,7 +1,6 @@
 const jwt = require("jsonwebtoken");
 
 const authorization = (req, res, next) => {
-<<<<<<< HEAD
 	const token =
 		req.cookies.jwtToken || req.headers.authorization?.split(" ")[1];
 	if (!token) {
@@ -17,23 +16,6 @@ const authorization = (req, res, next) => {
 		}
 		return res.status(401).send("Invalid token");
 	}
-=======
-  const token =
-    req.cookies.jwtToken || req.headers.authorization?.split(" ")[1];
-  if (!token) {
-    return res.status(401).send("Unauthorized: No token provided!");
-  }
-  try {
-    let payload = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = payload;
-    return next();
-  } catch (err) {
-    if (err.name === 'TokenExpiredError') {
-      return res.status(401).send("Session expired. Please log in again.");
-    }
-    return res.status(401).send("Invalid token");
-  }
->>>>>>> 856b5192e3eb7804623ca66bab52057b5ed55b99
 };
 
 // Role-specific middleware for Project Managers

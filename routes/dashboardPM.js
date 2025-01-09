@@ -18,7 +18,7 @@ router.get("/dashboard", authorizePM, verifyUserGID, (req, res) => {
 		`
 SELECT 
         p.id AS project_id, p.project_name, p.project_description, p.contract_num, 
-        p.contract_value, p.status, t.team_name,    pm.display_name AS pm_name,     co_pm.display_name AS co_pm_name,  
+        p.contract_value, p.status, t.id, t.team_name, p.pm_id, pm.display_name AS pm_name, co_pm_id, co_pm.display_name AS co_pm_name,  
         GROUP_CONCAT(CONCAT(u.display_name, ' (', tm.role, ')') SEPARATOR ', ') AS team_members
 FROM 
         projects p
@@ -174,7 +174,7 @@ router.put(
 			co_pm_id,
 			contract_num,
 			contract_value,
-			project_status,
+			status,
 		} = req.body;
 
 		// Validate input fields
@@ -183,7 +183,7 @@ router.put(
 			!project_description ||
 			!contract_num ||
 			!contract_value ||
-			!project_status ||
+			!status ||
 			!project_id
 		) {
 			return res.status(400).send({ message: "Missing required fields." });
@@ -212,7 +212,7 @@ router.put(
 					co_pm_id,
 					contract_num,
 					contract_value,
-					project_status,
+					status,
 					project_id,
 				],
 				(err, result) => {
@@ -228,12 +228,10 @@ router.put(
 							.send({ message: "Project not found or no changes made." });
 					}
 
-					return res
-						.status(200)
-						.send({
-							message: "Project updated successfully",
-							project_id: project_id,
-						});
+					return res.status(200).send({
+						message: "Project updated successfully",
+						project_id: project_id,
+					});
 				}
 			);
 		} catch (err) {
@@ -312,8 +310,9 @@ router.get("/team/find/allPM", authorizePM, verifyUserGID, (req, res) => {
             users u
         JOIN 
             profiles p ON u.id = p.user_id
+        JOIN roles r ON u.role_id = r.id
         WHERE 
-            p.role IN ('Project Manager', 'Program Manager') 
+            r.role_name IN ('project manager', 'program manager') 
             AND u.id != ?
         ORDER BY 
             u.display_name ASC;
