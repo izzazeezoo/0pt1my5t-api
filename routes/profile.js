@@ -1,28 +1,24 @@
 const db = require("../var/dbConfig");
 const express = require("express");
 const router = express.Router();
-const authorization = require("../middleware/authorization");
+const { authorization } = require("../middleware/authorization");
+const { verifyUserGID } = require("../middleware/verification");
+const jwt = require('jsonwebtoken');
 
 router.get("/", (req, res) => {
-	console.log("OK");
-	res.send("Response Success!");
+    console.log("OK");
+    res.send("Response Success!");
 });
 
 // ------------------------------------- DASHBOARD
 //GET Profile Data
-router.get("/profile", authorization, (req, res) => {
-    let gidUser = req.headers["x-google-id"];
-    console.log("Google ID :", gidUser);
-
-    // Check for missing parameter
-    if (!gidUser) {
-        return res.status(400).send({ message: "Parameter missing (GID)." });
-    }
+router.get("/profile", authorization, verifyUserGID, (req, res) => {
+    const { id: idUser } = req.user;
 
     // Fetch user data and check `form_filled` status
     db.query(
-        `SELECT id, form_filled FROM users WHERE google_id = ?`,
-        [gidUser],
+        `SELECT form_filled FROM users WHERE id = ?`,
+        [idUser],
         (err, results) => {
             if (err) {
                 console.error(err);
@@ -33,7 +29,7 @@ router.get("/profile", authorization, (req, res) => {
                 return res.status(404).json({ error: true, message: "User not found" });
             }
 
-            const { id: idUser, form_filled } = results[0];
+            const { form_filled } = results[0];
 
             // Check if the form has been filled
             if (form_filled === 0) {
@@ -70,39 +66,33 @@ router.get("/profile", authorization, (req, res) => {
 });
 
 //Post profile form
-router.post("/form", authorization, (req, res) => {
-	let gidUser = req.headers["x-google-id"]; 
-	console.log("Google ID :", gidUser);
+router.post("/form", authorization, verifyUserGID, (req, res) => {
+    const { id: idUser } = req.user;
 
-	//Check invalid parameter or parameter missing
-	if (!gidUser) {
-		return res.status(400).send({ message: "Parameter missing (GID)." });
-	}
+    console.log(req.body);
 
-	console.log(req.body);
+    const { employeeNumber, department, expLevel, role, userRoleID } = req.body;
 
-	const { employeeNumber, department, expLevel, role } = req.body;
+    //Check parameter missing
+    if (!employeeNumber || !department || !expLevel || !role || !userRoleID) {
+        return res.status(400).send({ message: "Parameter missing." });
+    }
 
-	//Check parameter missing
-	if (!employeeNumber || !department || !expLevel || !role) {
-		return res.status(400).send({ message: "Parameter missing." });
-	}
-
-	db.query(
-        `SELECT id, form_filled FROM users WHERE google_id = ?`,
-        [gidUser],
+    db.query(
+        `SELECT form_filled, google_id FROM users WHERE id = ?`,
+        [idUser],
         (err, results) => {
             if (err) {
                 console.error(err);
                 return res.status(500).json({ error: true, message: "Database error" });
             }
-    
+
             if (results.length === 0) {
                 return res.status(404).json({ error: true, message: "User not found" });
             }
-    
-            const { id: idUser, form_filled } = results[0]; // Extract idUser and form_filled
-    
+
+            const { form_filled, google_id } = results[0]; // Extract form_filled
+
             // Check if the form has already been filled
             if (form_filled === 1) {
                 return res.status(400).json({
@@ -110,7 +100,7 @@ router.post("/form", authorization, (req, res) => {
                     message: "You have already filled out this form",
                 });
             }
-    
+
             // Proceed to insert the profile data if the form is not filled
             db.query(
                 `INSERT INTO profiles (user_id, department, role, experience_level, np) VALUES (?, ?, ?, ?, ?)`,
@@ -122,29 +112,41 @@ router.post("/form", authorization, (req, res) => {
                             .status(500)
                             .json({ error: true, message: "Failed to insert profile data" });
                     }
-    
-                    // Update the form_filled status to 1 after successful insertion
+
+                    // Update the form_filled status to 1 and set role_id based on userRole
                     db.query(
-                        `UPDATE users SET form_filled = 1 WHERE id = ?`,
-                        [idUser],
+                        `UPDATE users SET form_filled = 1, role_id = ? WHERE id = ?`,
+                        [userRoleID, idUser],
                         (err) => {
                             if (err) {
                                 console.error(err);
                                 return res
                                     .status(500)
-                                    .json({ error: true, message: "Failed to update form status" });
+                                    .json({
+                                        error: true,
+                                        message: "Failed to update user role and form status",
+                                    });
                             }
-    
+
+                            // Generate a new JWT token with the updated role_id
+                            const newToken = jwt.sign(
+                                { user: google_id, role: userRoleID }, // Use the updated role_id
+                                process.env.JWT_SECRET || '',
+                                { expiresIn: '1h' } // Set the expiration time
+                            );
+
                             return res.status(201).json({
                                 error: false,
-                                message: "Profile data successfully created",
+                                message:
+                                    "Profile data successfully created and user role updated",
+                                token: newToken,
                             });
                         }
                     );
                 }
             );
         }
-    );    
+    );
 });
 
 module.exports = router;
