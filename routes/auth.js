@@ -16,14 +16,6 @@ authRouter.get(
     passport.authenticate('google', { failureRedirect: '/auth/unauthorized' }),
     (req, res) => {
         const { google_id, display_name, photo } = req.user;
-        // Save google_id in a cookie
-        //res.cookie('google_id', google_id, { httpOnly: true, secure: false }); // Set secure to true in production
-        res.cookie('google_id', google_id, { secure: false });
-        // Save display_name in a cookie
-        res.cookie('display_name', display_name, { secure: false });
-        // Save photo in a cookie
-        res.cookie('photo', encodeURIComponent(photo), { secure: false });
-        console.log("Cookies: google_id", google_id, "display_name: ",display_name, "photo: ",  photo);
 
         // Query the database to check `form_filled` and `role_id`
         db.query(
@@ -32,50 +24,65 @@ authRouter.get(
             (err, results) => {
                 if (err) {
                     console.error('Error:', err);
-                    alert('Error 500: Internal Server Error');
-                    //return res.status(500).send({ error: true, msg: 'Internal server error' });
+                    return res.status(500).json({ error: true, message: 'Internal Server Error' });
                 }
 
                 if (!results.length) {
-                    return res.status(404).send({ error: true, msg: 'User not found' });
+                    return res.status(404).json({ error: true, message: 'User not found' });
                 }
-                
-                const { form_filled, role_id } = results[0]; 
-                res.cookie('user_role', role_id, { secure: false });
-                console.log("Saved user role in cookie:", role_id);
 
-                // Generate and save JWT token
-                //const token = jwt.sign({ user: google_id }, process.env.JWT_SECRET || '', { expiresIn: '1h' });
+                const { form_filled, role_id } = results[0];
+
+                // Generate JWT token
                 const token = jwt.sign(
                     { user: google_id, role: role_id }, // Add the role to the payload
                     process.env.JWT_SECRET || '',
                     { expiresIn: '1h' }
                 );
-                res.cookie('jwtToken', token, { secure: false });
-                console.log("generated token in cookie:", token);
-                
+
+                // Prepare the response data
+                const responseData = {
+                    error: false,
+                    message: 'Login successful',
+                    data: {
+                        google_id,
+                        display_name,
+                        photo: encodeURIComponent(photo),
+                        user_role: role_id,
+                        token,
+                    },
+                };
+
+                console.log(responseData);
+
                 if (form_filled === 0) {  // If form_filled is 0, return 202 status
                     console.log('Form not filled. Returning HTTP 202.');
-                    /*return res.status(202).send({
-                        error: false,
-                        msg: 'Authentication successful, but form needs to be filled.',
-                    });*/
-                    res.redirect(`${frontendUrl}/form`);
-                } 
-
-                // Role-based redirection
-                switch (role_id) {
-                    case 1: // Admin
-                        return res.redirect(`${frontendUrl}/dashboard/admin`);
-                    case 2: // Team Member
-                        return res.redirect(`${frontendUrl}/dashboard/team_member`);
-                    case 3: // Project Manager
-                        return res.redirect(`${frontendUrl}/dashboard/project_manager`);
-                    default:
-                        return res.status(403).send({ error: true, msg: 'Invalid role' });
+                    responseData.redirect = `${frontendUrl}/form`;
+                } else {
+                    // Role-based redirection
+                    switch (role_id) {
+                        case 1: // Admin
+                            responseData.redirect = `${frontendUrl}/dashboard/admin`;
+                            break;
+                        case 2: // Team Member
+                            responseData.redirect = `${frontendUrl}/dashboard/team_member`;
+                            break;
+                        case 3: // Project Manager
+                            responseData.redirect = `${frontendUrl}/dashboard/project_manager`;
+                            break;
+                        case 4: // Project Admin
+                            responseData.redirect = `${frontendUrl}/dashboard/project_admin`;
+                            break;
+                        case 5: // Department Head
+                            responseData.redirect = `${frontendUrl}/dashboard/dept_head`;
+                            break;
+                        default:
+                            return res.status(403).json({ error: true, message: 'Invalid role' });
+                    }
                 }
 
-
+                // Send the response
+                return res.status(200).json(responseData);
             }
         );
     }
