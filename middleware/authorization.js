@@ -44,9 +44,23 @@ const authorizeAdmin = (req, res, next) => {
 	});
 };
 
+// Role-specific middleware for Project Administrators (PA)
+const authorizePA = (req, res, next) => {
+	authorization(req, res, () => {
+		if (req.user.role !== 4) {
+			//admin
+			return res.status(403).json({
+				message: "Access denied: Project Admin role required",
+			});
+		}
+		next();
+	});
+};
+
 // Export all middleware functions
 module.exports = {
 	authorization,
 	authorizePM,
 	authorizeAdmin,
+	authorizePA,
 };

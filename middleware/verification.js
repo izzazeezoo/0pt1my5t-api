@@ -29,7 +29,7 @@ const verifyUserGID = (req, res, next) => {
     );
 };
 
-const verifyCoPMRole = (userId) => {
+const verifyPMRole = (userId) => {
     return new Promise((resolve, reject) => {
         db.query(
             `SELECT role_id FROM users WHERE id = ?`,
@@ -52,5 +52,5 @@ const verifyCoPMRole = (userId) => {
 
 module.exports = {
     verifyUserGID,
-    verifyCoPMRole
+    verifyPMRole
 };
