@@ -50,7 +50,36 @@ const verifyPMRole = (userId) => {
     });
 };
 
+const verifyPrimaryPM = (req, res, next) => {
+    const { id: userId } = req.user;
+    const projectId = parseInt(req.params.projectId);
+  
+    db.query(
+      `SELECT pm_id FROM projects WHERE id = ?`,
+      [projectId],
+      (err, results) => {
+        if (err) {
+          console.error(err);
+          return res.status(500).json({ error: true, message: "Database error" });
+        }
+  
+        if (results.length === 0) {
+          return res.status(404).json({ error: true, message: "Project not found" });
+        }
+  
+        const { pm_id } = results[0];
+        if (pm_id !== userId) {
+          return res.status(403).json({ error: true, message: "Forbidden: not the primary PM for this project." });
+        }
+  
+        next();
+      }
+    );
+  };
+  
+
 module.exports = {
     verifyUserGID,
-    verifyPMRole
+    verifyPMRole,
+    verifyPrimaryPM
 };

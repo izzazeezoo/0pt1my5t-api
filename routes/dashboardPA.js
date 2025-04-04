@@ -18,11 +18,13 @@ router.get("/dashboard", authorizePA, verifyUserGID, (req, res) => {
     db.query(
         `
 SELECT 
-        p.id AS project_id, p.project_name, p.project_description, p.contract_num, p.contract_value, p.status, p.pm_id, pm.display_name AS pm_name
+        p.id AS project_id, p.project_name, p.project_description, GROUP_CONCAT(c.contract_num) AS contract_nums, p.contract_value, p.status, p.pm_id, pm.display_name AS pm_name
 FROM 
         projects p
 LEFT JOIN 
         users pm ON p.pm_id = pm.id  -- Join to get the PM's display name
+LEFT JOIN 
+        contracts c ON p.id = c.project_id
 GROUP BY 
         p.id;
     `,
@@ -51,7 +53,7 @@ router.post("/project", authorizePA, verifyUserGID, async (req, res) => {
         project_name,
         project_description,
         pm_id,
-        contract_num,
+        contract_num, // can be string (comma-separated) or array
         contract_value,
     } = req.body;
 
@@ -97,12 +99,24 @@ async function createProjectAndTeam(project_name, project_description, pm_id, co
     try {
         // Insert the project
         const projectResult = await queryAsync(
-            `INSERT INTO projects (project_name, project_description, pm_id, contract_num, contract_value, status) 
-            VALUES (?, ?, ?, ?, ?, 'Initiation')`,
-            [project_name, project_description, pm_id, contract_num, contract_value]
+            `INSERT INTO projects (project_name, project_description, pm_id, contract_value, status) 
+            VALUES (?, ?, ?, ?, 'Initiation')`,
+            [project_name, project_description, pm_id, contract_value]
         );
 
         const projectId = projectResult.insertId;
+
+        let contractNums = [];
+        if (Array.isArray(contract_num)) {
+            contractNums = contract_num;
+        } else if (typeof contract_num === "string") {
+            contractNums = contract_num.split(",").map(cn => cn.trim()).filter(Boolean);
+        }
+
+        // Insert contract numbers into contracts table
+        for (const cn of contractNums) {
+            await db.promise().query(` INSERT INTO contracts (project_id, contract_num) VALUES (?, ?)`, [projectId, cn]);
+        }
 
         // Insert the team
         const teamResult = await queryAsync(`INSERT INTO teams (project_id) VALUES (?)`, [projectId]);
@@ -111,6 +125,11 @@ async function createProjectAndTeam(project_name, project_description, pm_id, co
         // Insert the tribe
         const tribeResult = await queryAsync(`INSERT INTO tribes (project_id) VALUES (?)`, [projectId]);
         const tribeId = tribeResult.insertId;
+
+        // Insert the tribe
+        const teamMemberResult = await queryAsync(`INSERT INTO team_members (team_id, user_id, role, is_primary) 
+            VALUES (?, ?, 'Project Manager', 1)`, [teamId, pm_id]
+        );
 
         // Send email notification
         await sendProjectAssignmentEmail(pm_id, project_name);
@@ -151,13 +170,25 @@ async function sendProjectAssignmentEmail(pm_id, project_name) {
         });
 
         const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
+        const day = tomorrow.getDay(); // 0 (Sun) to 6 (Sat)
+
+        if (day === 5) {
+            // Friday → add 3 days to get to Monday
+            tomorrow.setDate(tomorrow.getDate() + 3);
+        } else if (day === 6) {
+            // Saturday → add 2 days to get to Monday
+            tomorrow.setDate(tomorrow.getDate() + 2);
+        } else {
+            // Any other day → add 1 day
+            tomorrow.setDate(tomorrow.getDate() + 1);
+        }
+
         const formattedDate = tomorrow.toLocaleDateString("id-ID",
             { year: "numeric", month: "long", day: "numeric", });
 
         const mailOptions = {
             from: process.env.EMAIL_USER,
-            to: pmEmail, 
+            to: pmEmail,
             subject: `Penunjukkan sebagai Project Manager untuk Proyek ${project_name}`,
             html: `
             <p>Dear ${pmName},</p>
