@@ -18,7 +18,9 @@ router.get("/dashboard", authorizePM, verifyUserGID, (req, res) => {
 		`
 SELECT 
         p.id AS project_id, p.project_name, p.project_description, p.contract_num, 
-        p.contract_value, p.status, t.id, t.team_name, p.pm_id, pm.display_name AS pm_name, co_pm_id, co_pm.display_name AS co_pm_name,  
+        p.contract_value, p.status, t.id, t.team_name, 
+		p.pm_id, pm.display_name AS pm_name, 
+		co_pm_id, co_pm.display_name AS co_pm_name, t.id AS team_id, 
         GROUP_CONCAT(CONCAT(u.display_name, ' (', tm.role, ')') SEPARATOR ', ') AS team_members
 FROM 
         projects p
@@ -67,6 +69,7 @@ router.post("/project", authorizePM, verifyUserGID, async (req, res) => {
 		co_pm_id,
 		contract_num,
 		contract_value,
+		project_status,
 	} = req.body;
 
 	// Validate input fields
@@ -98,15 +101,19 @@ router.post("/project", authorizePM, verifyUserGID, async (req, res) => {
 			pm_id,
 			co_pm_id,
 			contract_num,
-			contract_value
+			contract_value,
+			project_status
 		);
 
 		return res.status(201).send({
 			message: "Project and Team created successfully.",
-			redirect: `${frontendUrl}/dashboard/project/${projectId}`,
+			redirect: `${frontendUrl}/dashboard/`,
 			project_id: projectId,
+			project_name: project_name,
 			team_id: teamId,
 			team_name: `Team ${project_name}`,
+			status: project_status,
+			project: res.body,
 		});
 	} catch (err) {
 		console.error(err);
@@ -127,7 +134,7 @@ async function createProjectAndTeam(
 		// Insert the project
 		db.query(
 			`INSERT INTO projects (project_name, project_description, pm_id, co_pm_id, contract_num, contract_value, status) 
-             VALUES (?, ?, ?, ?, ?, ?, 'Project Initiation')`,
+             VALUES (?, ?, ?, ?, ?, ?, 'Initiation')`,
 			[
 				project_name,
 				project_description,
@@ -203,8 +210,8 @@ router.put(
 
 			db.query(
 				`UPDATE projects 
-             SET project_name = ?, project_description = ?, pm_id = ?, co_pm_id = ?, contract_num = ?, contract_value = ?, status = ? 
-             WHERE id = ?`,
+             	SET project_name = ?, project_description = ?, pm_id = ?, co_pm_id = ?, contract_num = ?, contract_value = ?, status = ?
+             	WHERE id = ?`,
 				[
 					project_name,
 					project_description,
@@ -227,10 +234,12 @@ router.put(
 							.status(404)
 							.send({ message: "Project not found or no changes made." });
 					}
+					console.log(res);
 
 					return res.status(200).send({
 						message: "Project updated successfully",
 						project_id: project_id,
+						project: res.body,
 					});
 				}
 			);
@@ -245,7 +254,7 @@ router.put(
 router.post("/team/find/:teamId", authorizePM, verifyUserGID, (req, res) => {
 	let team_id = parseInt(req.params.teamId); //ID Team
 	const { id: pm_id } = req.user; // Current user's PM ID
-	const { role, required_count } = req.body;
+	const { role, required_count, co_pm_id } = req.body;
 
 	if (!role || !required_count || !team_id) {
 		return res
@@ -271,13 +280,18 @@ router.post("/team/find/:teamId", authorizePM, verifyUserGID, (req, res) => {
                 FROM team_members 
                 WHERE team_id = ?
             ) AND u.id != ?
+			 AND u.id NOT IN (
+                SELECT user_id 
+                FROM team_members 
+                WHERE team_id = ?
+            ) AND u.id != ?
         GROUP BY 
             u.id, p.role, p.np, p.experience_level
         ORDER BY 
-            project_count ASC, FIELD(p.experience_level, 'Senior', 'Middle', 'Junior') DESC
+            project_count ASC, FIELD(p.experience_level, 'Senior', 'Middle', 'Junior') ASC
         LIMIT ?
         `,
-		[role, team_id, pm_id, required_count * 2 + 1],
+		[role, team_id, pm_id, team_id, co_pm_id, required_count * 2 + 1],
 		(err, results) => {
 			if (err) {
 				console.error(err);
