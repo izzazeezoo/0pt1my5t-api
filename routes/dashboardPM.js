@@ -7,181 +7,169 @@ const {
 	authorizeAdmin,
 } = require("../middleware/authorization");
 const frontendUrl = process.env.FRONTEND_URL;
-const { verifyUserGID, verifyCoPMRole } = require("../middleware/verification");
+const {
+	verifyUserGID,
+	verifyPMRole,
+	verifyPrimaryPM,
+} = require("../middleware/verification");
 
 //GET Dashboard (PM) Data
-router.get("/dashboard", authorizePM, verifyUserGID, (req, res) => {
+// Route: GET /dashboard (PM View)
+router.get("/dashboard", authorizePM, verifyUserGID, async (req, res) => {
 	const { id: idUser } = req.user;
 
-	// Fetch all projects where the user is a Project Manager
-	db.query(
-		`
-SELECT 
-        p.id AS project_id, p.project_name, p.project_description, p.contract_num, 
-        p.contract_value, p.status, t.id, t.team_name, 
-		p.pm_id, pm.display_name AS pm_name, 
-		co_pm_id, co_pm.display_name AS co_pm_name, t.id AS team_id, 
-        GROUP_CONCAT(CONCAT(u.display_name, ' (', tm.role, ')') SEPARATOR ', ') AS team_members
-FROM 
-        projects p
-LEFT JOIN 
-        teams t ON p.id = t.project_id
-LEFT JOIN 
-        team_members tm ON t.id = tm.team_id
-LEFT JOIN 
-        users u ON tm.user_id = u.id
-LEFT JOIN 
-        users pm ON p.pm_id = pm.id  -- Join to get the PM's display name
-LEFT JOIN 
-        users co_pm ON p.co_pm_id = co_pm.id  -- Join to get the Co-PM's display name
-WHERE 
-        p.pm_id = ?
-    GROUP BY 
-        p.id, t.id;
-    `,
-		[idUser],
-		(err, result) => {
-			if (err) {
-				console.error(err);
-				return res.status(500).send({ message: "Database error" });
-			}
-			if (!result.length) {
-				return res
-					.status(404)
-					.send({ message: "No projects found for this user" });
-			} else {
-				return res.status(200).send({
-					error: false,
-					message: "Retrieve data success",
-					projects: result,
-				});
-			}
-		}
-	);
-});
-
-// POST Route to Create a New Project
-router.post("/project", authorizePM, verifyUserGID, async (req, res) => {
-	const { id: pm_id } = req.user;
-	const {
-		project_name,
-		project_description,
-		co_pm_id,
-		contract_num,
-		contract_value,
-		project_status,
-	} = req.body;
-
-	// Validate input fields
-	if (
-		!project_name ||
-		!project_description ||
-		!contract_num ||
-		!contract_value
-	) {
-		return res.status(400).send({ message: "Missing required fields." });
-	}
-
 	try {
-		// If co_pm_id is provided, verify their role
-		if (co_pm_id) {
-			const isCoPMAuthorized = await verifyCoPMRole(co_pm_id);
-
-			if (!isCoPMAuthorized) {
-				return res.status(403).send({
-					message: "co_pm_id is not authorized as a project manager.",
-				});
-			}
-		}
-
-		// Proceed to create the project and team
-		const { projectId, teamId } = await createProjectAndTeam(
-			project_name,
-			project_description,
-			pm_id,
-			co_pm_id,
-			contract_num,
-			contract_value,
-			project_status
+		// Step 1: Fetch all projects where the user is either primary PM or part of the team with PM role
+		const [projects] = await db.promise().query(
+			`
+		SELECT DISTINCT p.id AS project_id, p.project_name, p.project_description, 
+						c.contract_nums, p.contract_value, p.status, p.size,
+						p.pm_id, pm.display_name AS pm_name,
+						t.id AS team_id, tr.id AS tribe_id
+		FROM projects p
+		LEFT JOIN teams t ON p.id = t.project_id
+		LEFT JOIN team_members tm ON t.id = tm.team_id
+		LEFT JOIN users pm ON p.pm_id = pm.id
+		LEFT JOIN (
+			SELECT project_id, GROUP_CONCAT(contract_num) AS contract_nums
+			FROM contracts
+			GROUP BY project_id
+		) c ON p.id = c.project_id
+		LEFT JOIN tribes tr ON p.id = tr.project_id
+		WHERE p.pm_id = ? OR (tm.user_id = ?)
+		GROUP BY 
+        p.id;
+	  `,
+			[idUser, idUser]
 		);
 
-		return res.status(201).send({
-			message: "Project and Team created successfully.",
-			redirect: `${frontendUrl}/dashboard/`,
-			project_id: projectId,
-			project_name: project_name,
-			team_id: teamId,
-			team_name: `Team ${project_name}`,
-			status: project_status,
-			project: res.body,
+		const detailedProjects = await Promise.all(
+			projects.map(async (proj) => {
+				// Step 2: Get ordered team members by rank
+				const [teamMembers] = await db.promise().query(
+					`
+		  SELECT r.name AS rank_name,
+				 GROUP_CONCAT(CONCAT(u.display_name, ' (', tm.role, ')') ORDER BY tm.role, u.display_name SEPARATOR ', ') AS members
+		  FROM team_members tm
+		  JOIN users u ON tm.user_id = u.id
+		  JOIN ranks r ON tm.rank = r.rank
+		  WHERE tm.team_id = ?
+		  GROUP BY r.name
+		  ORDER BY r.rank ASC
+		`,
+					[proj.team_id]
+				);
+
+				// Step 3: Get ordered tribe members by job group and experience level
+				const [tribeMembers] = await db.promise().query(
+					`
+		  SELECT r.name AS rank_name, pr.job_group, pr.experience_level, 
+		  GROUP_CONCAT(CONCAT(u.display_name, 
+            CASE 
+                WHEN r.name != 'ANGGOTA' AND tm.role IS NOT NULL 
+                THEN CONCAT(' (', tm.role, ')') 
+                ELSE '' 
+            END
+        ) ORDER BY u.display_name SEPARATOR ', ') AS members,
+		 COUNT(*) AS count
+		  FROM tribe_members tm
+		  JOIN users u ON tm.user_id = u.id
+		  JOIN ranks r ON tm.rank = r.rank
+		  JOIN profiles pr ON u.id = pr.user_id
+		  WHERE tm.tribe_id = ?
+		  GROUP BY r.name, pr.job_group, pr.experience_level
+		  ORDER BY r.rank ASC, pr.job_group ASC,
+				   FIELD(pr.experience_level, 'Senior', 'Middle', 'Junior')
+		`,
+					[proj.tribe_id]
+				);
+
+				return {
+					...proj,
+					team_structure: teamMembers.map(
+						(t) => `${t.rank_name} : ${t.members}`
+					),
+					tribe_structure: groupTribeMembers(tribeMembers),
+				};
+			})
+		);
+
+		return res.status(200).send({
+			error: false,
+			message: "Retrieve data success",
+			projects: detailedProjects,
 		});
 	} catch (err) {
 		console.error(err);
-		return res.status(500).send({ message: "Internal server error." });
+		return res.status(500).send({ message: "Server error" });
 	}
 });
 
-// Function to insert the project and create the team
-async function createProjectAndTeam(
-	project_name,
-	project_description,
-	pm_id,
-	co_pm_id,
-	contract_num,
-	contract_value
-) {
-	return new Promise((resolve, reject) => {
-		// Insert the project
-		db.query(
-			`INSERT INTO projects (project_name, project_description, pm_id, co_pm_id, contract_num, contract_value, status) 
-             VALUES (?, ?, ?, ?, ?, ?, 'Initiation')`,
-			[
-				project_name,
-				project_description,
-				pm_id,
-				co_pm_id,
-				contract_num,
-				contract_value,
-			],
-			(err, result) => {
-				if (err) {
-					return reject(new Error("Database insertion error"));
-				}
+// Helper function to group tribe members by job group and experience level
+function groupTribeMembers(rows) {
+	const result = {};
 
-				const projectId = result.insertId; // Get the ID of the newly inserted project
-				const team_name = `Team ${project_name}`;
-
-				// Now insert the team for this project
-				db.query(
-					`INSERT INTO teams (team_name, project_id) VALUES (?, ?)`,
-					[team_name, projectId],
-					(err) => {
-						if (err) {
-							return reject(new Error("Database error while creating team"));
-						}
-						resolve({ projectId, team_name });
-					}
-				);
+	// Process leadership roles (non-MEMBER)
+	rows.forEach((row) => {
+		if (row.rank_name.toUpperCase() !== "ANGGOTA") {
+			if (!result[row.rank_name]) {
+				result[row.rank_name] = [];
 			}
-		);
+			result[row.rank_name].push({
+				name: row.members,
+				job_group: row.job_group,
+				role: row.role,
+			});
+		}
+	});
+
+	// Process MEMBER roles (grouped by job_group and experience_level)
+	const memberGroups = {};
+	rows.forEach((row) => {
+		if (row.rank_name.toUpperCase() === "ANGGOTA") {
+			if (!memberGroups[row.job_group]) memberGroups[row.job_group] = [];
+			memberGroups[row.job_group].push(
+				`${row.experience_level} (${row.count}): ${row.members}`
+			);
+		}
+	});
+
+	// Structure the member section
+	if (Object.keys(memberGroups).length > 0) {
+		result.ANGGOTA = Object.entries(memberGroups).map(([jobGroup, details]) => {
+			return { job_group: jobGroup, levels: details };
+		});
+	}
+
+	return result;
+}
+
+// Helper function to promisify queries
+function queryAsync(query, values) {
+	return new Promise((resolve, reject) => {
+		db.query(query, values, (err, result) => {
+			if (err) return reject(err);
+			resolve(result);
+		});
 	});
 }
 
-// POST Route to Create a New Project
+// PUT Route to Update a Project
 router.put(
 	"/project/:projectId",
 	authorizePM,
 	verifyUserGID,
+	verifyPrimaryPM,
 	async (req, res) => {
-		let project_id = parseInt(req.params.projectId); //ID Project
+		let project_id = parseInt(req.params.projectId); // ID Project
 		const { id: pm_id } = req.user;
 		const {
 			project_name,
 			project_description,
-			co_pm_id,
 			contract_num,
 			contract_value,
 			status,
+			size,
 		} = req.body;
 
 		// Validate input fields
@@ -191,58 +179,62 @@ router.put(
 			!contract_num ||
 			!contract_value ||
 			!status ||
+			!size ||
 			!project_id
 		) {
 			return res.status(400).send({ message: "Missing required fields." });
 		}
 
+		// Convert contract_num to array if needed
+		let contractNums = [];
+		if (Array.isArray(contract_num)) {
+			contractNums = contract_num;
+		} else if (typeof contract_num === "string") {
+			contractNums = contract_num
+				.split(",")
+				.map((cn) => cn.trim())
+				.filter(Boolean);
+		}
+
 		try {
-			// If co_pm_id is provided, verify their role
-			if (co_pm_id) {
-				const isCoPMAuthorized = await verifyCoPMRole(co_pm_id);
-
-				if (!isCoPMAuthorized) {
-					return res.status(403).send({
-						message: "co_pm_id is not authorized as a project manager.",
-					});
-				}
-			}
-
-			db.query(
+			// Update the project
+			const updateResult = await queryAsync(
 				`UPDATE projects 
-             	SET project_name = ?, project_description = ?, pm_id = ?, co_pm_id = ?, contract_num = ?, contract_value = ?, status = ?
-             	WHERE id = ?`,
+                 SET project_name = ?, project_description = ?, contract_value = ?, status = ?, size = ?
+                 WHERE id = ?`,
 				[
 					project_name,
 					project_description,
-					pm_id,
-					co_pm_id,
-					contract_num,
 					contract_value,
 					status,
+					size,
 					project_id,
-				],
-				(err, result) => {
-					if (err) {
-						console.error(err);
-						return res.status(500).send({ message: "Database update error" });
-					}
-
-					// Check if any rows were affected
-					if (result.affectedRows === 0) {
-						return res
-							.status(404)
-							.send({ message: "Project not found or no changes made." });
-					}
-					console.log(res);
-
-					return res.status(200).send({
-						message: "Project updated successfully",
-						project_id: project_id,
-						project: res.body,
-					});
-				}
+				]
 			);
+
+			if (updateResult.affectedRows === 0) {
+				return res
+					.status(404)
+					.send({ message: "Project not found or no changes made." });
+			}
+
+			// Update contracts: delete old ones, insert new ones
+			await queryAsync(`DELETE FROM contracts WHERE project_id = ?`, [
+				project_id,
+			]);
+
+			if (contractNums.length > 0) {
+				const contractValues = contractNums.map((cn) => [project_id, cn]);
+				await queryAsync(
+					`INSERT INTO contracts (project_id, contract_num) VALUES ?`,
+					[contractValues]
+				);
+			}
+
+			return res.status(200).send({
+				message: "Project and contracts updated successfully",
+				project_id: project_id,
+			});
 		} catch (err) {
 			console.error(err);
 			return res.status(500).send({ message: "Internal server error." });
