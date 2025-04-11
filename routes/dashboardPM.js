@@ -304,46 +304,6 @@ router.post("/team/find/:teamId", authorizePM, verifyUserGID, (req, res) => {
 	);
 });
 
-// GET Route for Find All PMs
-router.get("/team/find/allPM", authorizePM, verifyUserGID, (req, res) => {
-	const { id: pm_id } = req.user; // Current user's PM ID
-
-	db.query(
-		`
-        SELECT 
-            u.id AS user_id, u.display_name
-        FROM 
-            users u
-        JOIN 
-            profiles p ON u.id = p.user_id
-        JOIN roles r ON u.role_id = r.id
-        WHERE 
-            r.role_name IN ('project manager', 'program manager') 
-            AND u.id != ?
-        ORDER BY 
-            u.display_name ASC;
-        `,
-		[pm_id], // Exclude the current user
-		(err, results) => {
-			if (err) {
-				console.error(err);
-				return res.status(500).send({ message: "Database error" });
-			}
-
-			if (results.length === 0) {
-				return res
-					.status(404)
-					.send({ message: "No Project Managers or Program Managers found." });
-			}
-
-			return res.status(200).send({
-				message: "Project Managers retrieved successfully.",
-				profiles: results,
-			});
-		}
-	);
-});
-
 // POST Route for Assigning Team Members
 router.post("/team/assign", authorizePM, (req, res) => {
 	const { team_id, members } = req.body;
@@ -353,6 +313,9 @@ router.post("/team/assign", authorizePM, (req, res) => {
 			.status(400)
 			.send({ message: "Team ID and members are required." });
 	}
+
+	const newMemberName = members.map((member) => member.member_name);
+	const newMemberRole = members.map((member) => member.role);
 
 	// Insert each member into the team_members table
 	const values = members.map((member) => [
@@ -371,6 +334,7 @@ router.post("/team/assign", authorizePM, (req, res) => {
 			}
 
 			return res.status(201).send({
+				data: [newMemberName, newMemberRole],
 				message:
 					"Members assigned successfully. Current Status: Waiting for Approval.",
 			});
