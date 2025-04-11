@@ -34,8 +34,8 @@ authRouter.get(
                 if (!results.length) {
                     return res.status(404).send({ error: true, msg: 'User not found' });
                 }
-                
-                const { form_filled, role_id } = results[0]; 
+
+                const { form_filled, role_id } = results[0];
                 res.cookie('user_role', role_id, { secure: false });
 
                 // Generate and save JWT token
@@ -58,34 +58,36 @@ authRouter.get(
                     },
                 };
                 console.log(responseData);
-                
+
                 if (form_filled === 0) {  // If form_filled is 0, return 202 status
                     console.log('Form not filled. Returning HTTP 202.');
                     res.redirect(`${frontendUrl}/form`);
-                } 
-
-                // Role-based redirection
-                switch (role_id) {
-                    case 1: // Admin
-                        return res.redirect(`${frontendUrl}/dashboard/admin`);
-                    case 2: // Team Member
-                        return res.redirect(`${frontendUrl}/dashboard/team_member`);
-                    case 3: // Project Manager
-                        return res.redirect(`${frontendUrl}/dashboard/project_manager`);
-                    case 4:
-                        return res.redirect(`${frontendUrl}/dashboard/project_admin`);
-                    case 5:
-                        return res.redirect(`${frontendUrl}/dashboard/dept_head`);
-                    default:
-                        return res.status(403).send({ error: true, msg: 'Invalid role' });
                 }
+                else {
+                    // Role-based redirection
+                    switch (role_id) {
+                        case 1: // Admin
+                            return res.redirect(`${frontendUrl}/dashboard/admin`);
+                        case 2: // Team Member
+                            return res.redirect(`${frontendUrl}/dashboard/team_member`);
+                        case 3: // Project Manager
+                            return res.redirect(`${frontendUrl}/dashboard/project_manager`);
+                        case 4:
+                            return res.redirect(`${frontendUrl}/dashboard/project_admin`);
+                        case 5:
+                            return res.redirect(`${frontendUrl}/dashboard/dept_head`);
+                        default:
+                            return res.status(403).send({ error: true, msg: 'Invalid role' });
+                    }
+                }
+
             }
         );
     }
 );
 
 authRouter.get('/unauthorized', (req, res) => {
-    res.redirect(`${frontendUrl}/unauthorized`);
+    return res.redirect(`${frontendUrl}/unauthorized`);
 });
 
 authRouter.post('/logout', (req, res) => {
