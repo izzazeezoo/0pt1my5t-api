@@ -100,55 +100,6 @@ router.get("/dashboard", authorizePM, verifyUserGID, async (req, res) => {
   }
 });
 
-// Helper function to group tribe members by job group and experience level
-function groupTribeMembers(rows) {
-	const result = {};
-
-	// Process leadership roles (non-MEMBER)
-	rows.forEach((row) => {
-		if (row.rank_name.toUpperCase() !== "ANGGOTA") {
-			if (!result[row.rank_name]) {
-				result[row.rank_name] = [];
-			}
-			result[row.rank_name].push({
-				name: row.members,
-				job_group: row.job_group,
-				role: row.role,
-			});
-		}
-	});
-
-	// Process MEMBER roles (grouped by job_group and experience_level)
-	const memberGroups = {};
-	rows.forEach((row) => {
-		if (row.rank_name.toUpperCase() === "ANGGOTA") {
-			if (!memberGroups[row.job_group]) memberGroups[row.job_group] = [];
-			memberGroups[row.job_group].push(
-				`${row.experience_level} (${row.count}): ${row.members}`
-			);
-		}
-	});
-
-	// Structure the member section
-	if (Object.keys(memberGroups).length > 0) {
-		result.ANGGOTA = Object.entries(memberGroups).map(([jobGroup, details]) => {
-			return { job_group: jobGroup, levels: details };
-		});
-	}
-
-	return result;
-}
-
-// Helper function to promisify queries
-function queryAsync(query, values) {
-    return new Promise((resolve, reject) => {
-        db.query(query, values, (err, result) => {
-            if (err) return reject(err);
-            resolve(result);
-        });
-    });
-}
-
 // PUT Route to Update a Project
 router.put(
     "/project/:projectId",
@@ -231,19 +182,28 @@ router.put(
     }
 );
 
-// GET Route for Find All in PMO
+// GET Route for Find All in PMO (Management Office)
 router.get("/team/find/allPMO", authorizePM, verifyUserGID, (req, res) => {
 	const { id: pm_id } = req.user; // Current user's PM ID
 
 	db.query(
 		`
         SELECT 
-            u.id AS user_id, u.display_name, p.role
+            u.id AS user_id, u.display_name, p.role,
+            COALESCE(SUM(
+                CASE 
+                    WHEN prj.size = 'Small' THEN 1
+                    WHEN prj.size = 'Medium' THEN 1.5
+                    WHEN prj.size = 'Big' THEN 2
+                    ELSE 1
+                END
+            ), 0) AS workload_score
         FROM 
             users u
         JOIN 
             profiles p ON u.id = p.user_id
-        JOIN roles r ON u.role_id = r.id
+        JOIN 
+            roles r ON u.role_id = r.id
         WHERE 
 			p.job_group = 'PMO'
             AND u.id != ?
@@ -503,6 +463,55 @@ router.post("/tribe/assign", authorizePM, async (req, res) => {
         });
     }
 });
+
+// Helper function to group tribe members by job group and experience level
+function groupTribeMembers(rows) {
+	const result = {};
+
+	// Process leadership roles (non-MEMBER)
+	rows.forEach((row) => {
+		if (row.rank_name.toUpperCase() !== "ANGGOTA") {
+			if (!result[row.rank_name]) {
+				result[row.rank_name] = [];
+			}
+			result[row.rank_name].push({
+				name: row.members,
+				job_group: row.job_group,
+				role: row.role,
+			});
+		}
+	});
+
+	// Process MEMBER roles (grouped by job_group and experience_level)
+	const memberGroups = {};
+	rows.forEach((row) => {
+		if (row.rank_name.toUpperCase() === "ANGGOTA") {
+			if (!memberGroups[row.job_group]) memberGroups[row.job_group] = [];
+			memberGroups[row.job_group].push(
+				`${row.experience_level} (${row.count}): ${row.members}`
+			);
+		}
+	});
+
+	// Structure the member section
+	if (Object.keys(memberGroups).length > 0) {
+		result.ANGGOTA = Object.entries(memberGroups).map(([jobGroup, details]) => {
+			return { job_group: jobGroup, levels: details };
+		});
+	}
+
+	return result;
+}
+
+// Helper function to promisify queries
+function queryAsync(query, values) {
+    return new Promise((resolve, reject) => {
+        db.query(query, values, (err, result) => {
+            if (err) return reject(err);
+            resolve(result);
+        });
+    });
+}
 
 router.post("/task", authorizePM, (req, res) => {
 	const {
