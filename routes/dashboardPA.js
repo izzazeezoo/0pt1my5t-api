@@ -46,6 +46,51 @@ GROUP BY
     );
 });
 
+// GET Route for Find All PMs
+router.get("/team/find/allPM", authorizePA, verifyUserGID, (req, res) => {
+	db.query(
+		`
+        SELECT 
+            u.id AS user_id, u.display_name,
+            COALESCE(SUM(
+                CASE 
+                    WHEN prj.size = 'Small' THEN 1
+                    WHEN prj.size = 'Medium' THEN 1.5
+                    WHEN prj.size = 'Big' THEN 2
+                    ELSE 1
+                END
+            ), 0) AS workload_score
+        FROM 
+            users u
+        JOIN 
+            profiles p ON u.id = p.user_id
+        JOIN 
+            roles r ON u.role_id = r.id
+        WHERE 
+            p.role = 'Project Manager'
+        ORDER BY 
+            FIELD(p.experience_level, 'Senior', 'Middle', 'Junior') DESC, u.display_name ASC;
+        `,
+		(err, results) => {
+			if (err) {
+				console.error(err);
+				return res.status(500).send({ message: "Database error" });
+			}
+
+			if (results.length === 0) {
+				return res
+					.status(404)
+					.send({ message: "No Project Managers or Program Managers found." });
+			}
+
+			return res.status(200).send({
+				message: "Project Managers retrieved successfully.",
+				profiles: results,
+			});
+		}
+	);
+});
+
 // POST Route to Create a New Project
 router.post("/project", authorizePA, verifyUserGID, async (req, res) => {
     const { id: idUser } = req.user;
@@ -240,42 +285,5 @@ async function getPMDetails(pm_id) {
         );
     });
 }
-
-// GET Route for Find All PMs
-router.get("/team/find/allPM", authorizePA, verifyUserGID, (req, res) => {
-	db.query(
-		`
-        SELECT 
-            u.id AS user_id, u.display_name
-        FROM 
-            users u
-        JOIN 
-            profiles p ON u.id = p.user_id
-        JOIN 
-            roles r ON u.role_id = r.id
-        WHERE 
-            p.role = 'Project Manager'
-        ORDER BY 
-            FIELD(p.experience_level, 'Senior', 'Middle', 'Junior') DESC, u.display_name ASC;
-        `,
-		(err, results) => {
-			if (err) {
-				console.error(err);
-				return res.status(500).send({ message: "Database error" });
-			}
-
-			if (results.length === 0) {
-				return res
-					.status(404)
-					.send({ message: "No Project Managers or Program Managers found." });
-			}
-
-			return res.status(200).send({
-				message: "Project Managers retrieved successfully.",
-				profiles: results,
-			});
-		}
-	);
-});
 
 module.exports = router;
