@@ -1,4 +1,5 @@
 const jwt = require("jsonwebtoken");
+const frontendUrl = process.env.FRONTEND_URL;
 
 const authorization = (req, res, next) => {
 	const token =
@@ -13,8 +14,10 @@ const authorization = (req, res, next) => {
 	} catch (err) {
 		if (err.name === "TokenExpiredError") {
 			return res.status(401).send("Session expired. Please log in again.");
+			// res.redirect(`${frontendUrl}/login?error=unauthorized`);
 		}
 		return res.status(401).send("Invalid token");
+		// res.redirect(`${frontendUrl}/login?error=unauthorized`);
 	}
 };
 

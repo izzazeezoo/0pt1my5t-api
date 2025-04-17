@@ -242,11 +242,16 @@ router.put(
 );
 
 // GET Route for Find All in PMO
-router.get("/team/find/allPMO", authorizePM, verifyUserGID, (req, res) => {
-	const { id: pm_id } = req.user; // Current user's PM ID
+router.get(
+	"/team/find/allPMO/:teamId",
+	authorizePM,
+	verifyUserGID,
+	(req, res) => {
+		const { id: pm_id } = req.user; // Current user's PM ID
+		const team_id = parseInt(req.params.teamId);
 
-	db.query(
-		`
+		db.query(
+			`
         SELECT 
             u.id AS user_id, u.display_name, p.role
         FROM 
@@ -257,29 +262,37 @@ router.get("/team/find/allPMO", authorizePM, verifyUserGID, (req, res) => {
         WHERE 
 			p.job_group = 'PMO'
             AND u.id != ?
+			AND u.id NOT IN (
+                SELECT user_id 
+                FROM team_members 
+                WHERE team_id  = ?
+            ) 
         ORDER BY 
             u.display_name ASC;
         `,
-		[pm_id], // Exclude the current user
-		(err, results) => {
-			if (err) {
-				console.error(err);
-				return res.status(500).send({ message: "Database error" });
-			}
+			[pm_id, team_id], // Exclude the current user
+			(err, results) => {
+				if (err) {
+					console.error(err);
+					return res.status(500).send({ message: "Database error" });
+				}
 
-			if (results.length === 0) {
-				return res
-					.status(404)
-					.send({ message: "No Project Managers or Program Managers found." });
-			}
+				if (results.length === 0) {
+					return res
+						.status(404)
+						.send({
+							message: "No Project Managers or Program Managers found.",
+						});
+				}
 
-			return res.status(200).send({
-				message: "Project Managers retrieved successfully.",
-				profiles: results,
-			});
-		}
-	);
-});
+				return res.status(200).send({
+					message: "Project Managers retrieved successfully.",
+					profiles: results,
+				});
+			}
+		);
+	}
+);
 
 // POST Route for Assigning Team Members with Rank - Management Office
 router.post("/team/assign", authorizePM, async (req, res) => {
@@ -319,7 +332,7 @@ router.post("/team/assign", authorizePM, async (req, res) => {
 		// 5. If nothing to insert
 		if (newMembers.length === 0) {
 			return res.status(400).send({
-				message: "All selected users are already assigned to the team.",
+				message: "Selected users are already assigned to the team.",
 			});
 		}
 
@@ -352,6 +365,7 @@ router.post("/tribe/find/:tribeId", authorizePM, verifyUserGID, (req, res) => {
 	const { id: pm_id } = req.user;
 	const { job_group, experience_level, required_count, role } = req.body;
 
+	console.log(req.body);
 	if (!job_group || !experience_level || !required_count || !tribe_id) {
 		return res.status(400).send({
 			message:
@@ -412,6 +426,7 @@ router.post("/tribe/find/:tribeId", authorizePM, verifyUserGID, (req, res) => {
 		required_count * 2 + 1,
 	];
 
+	console.log(params);
 	db.query(query, params, (err, results) => {
 		if (err) {
 			console.error(err);
@@ -419,6 +434,7 @@ router.post("/tribe/find/:tribeId", authorizePM, verifyUserGID, (req, res) => {
 		}
 
 		if (results.length === 0) {
+			console.log("masa 0");
 			return res.status(404).send({
 				message: "No profiles found matching the criteria.",
 			});
@@ -435,6 +451,7 @@ router.post("/tribe/find/:tribeId", authorizePM, verifyUserGID, (req, res) => {
 router.post("/tribe/assign", authorizePM, async (req, res) => {
 	try {
 		const { tribe_id, members } = req.body;
+		console.log("Member info: ", members);
 
 		// Input validation
 		if (!tribe_id || !Array.isArray(members) || members.length === 0) {
