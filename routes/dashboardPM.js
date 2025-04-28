@@ -182,6 +182,41 @@ router.put(
     }
 );
 
+// PUT Route to Update Team Status
+router.put(
+    "/task-force-submission/:projectId",
+    authorizePM,
+    verifyUserGID,
+    verifyPrimaryPM,
+    async (req, res) => {
+        let project_id = parseInt(req.params.projectId); // ID Project
+        try {
+            // Update the project
+            const updateResult = await queryAsync(
+                `UPDATE projects 
+                 SET _team_status = 'Submitted'
+                 WHERE id = ?`,
+                [project_id]
+            );
+
+            if (updateResult.affectedRows === 0) {
+                return res
+                    .status(404)
+                    .send({ message: "Project not found or no changes made." });
+            }
+
+            return res.status(200).send({
+                message: "Task Force (SATGAS) status updated successfully",
+                project_id: project_id,
+            });
+
+        } catch (err) {
+            console.error(err);
+            return res.status(500).send({ message: "Internal server error." });
+        }
+    }
+);
+
 // GET Route for Find All in PMO (Management Office)
 router.get("/team/find/allPMO", authorizePM, verifyUserGID, (req, res) => {
 	const { id: pm_id } = req.user; // Current user's PM ID

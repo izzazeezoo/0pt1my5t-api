@@ -76,7 +76,6 @@ const verifyPrimaryPM = (req, res, next) => {
       }
     );
   };
-  
 
 module.exports = {
     verifyUserGID,

@@ -9,6 +9,22 @@ const {
 const frontendUrl = process.env.FRONTEND_URL;
 const { verifyUserGID, verifyPMRole } = require("../middleware/verification");
 const nodemailer = require("nodemailer");
+const fs = require("fs");
+const path = require("path");
+const PizZip = require("pizzip");
+const Docxtemplater = require("docxtemplater");
+const { google } = require('googleapis');
+
+// Load service account credentials
+const KEYFILEPATH = path.join(__dirname, process.env.SERVICE_ACCOUNT_CREDENTIAL); // adjust this
+const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
+
+const auth = new google.auth.GoogleAuth({
+    keyFile: KEYFILEPATH,
+    scopes: SCOPES,
+});
+
+const drive = google.drive({ version: 'v3', auth });
 
 //GET Dashboard (PA) Data
 router.get("/dashboard", authorizePA, verifyUserGID, (req, res) => {
@@ -48,8 +64,8 @@ GROUP BY
 
 // GET Route for Find All PMs
 router.get("/team/find/allPM", authorizePA, verifyUserGID, (req, res) => {
-	db.query(
-		`
+    db.query(
+        `
         SELECT 
             u.id AS user_id, u.display_name,
             COALESCE(SUM(
@@ -71,24 +87,24 @@ router.get("/team/find/allPM", authorizePA, verifyUserGID, (req, res) => {
         ORDER BY 
             FIELD(p.experience_level, 'Senior', 'Middle', 'Junior') DESC, u.display_name ASC;
         `,
-		(err, results) => {
-			if (err) {
-				console.error(err);
-				return res.status(500).send({ message: "Database error" });
-			}
+        (err, results) => {
+            if (err) {
+                console.error(err);
+                return res.status(500).send({ message: "Database error" });
+            }
 
-			if (results.length === 0) {
-				return res
-					.status(404)
-					.send({ message: "No Project Managers or Program Managers found." });
-			}
+            if (results.length === 0) {
+                return res
+                    .status(404)
+                    .send({ message: "No Project Managers or Program Managers found." });
+            }
 
-			return res.status(200).send({
-				message: "Project Managers retrieved successfully.",
-				profiles: results,
-			});
-		}
-	);
+            return res.status(200).send({
+                message: "Project Managers retrieved successfully.",
+                profiles: results,
+            });
+        }
+    );
 });
 
 // POST Route to Create a New Project
@@ -136,6 +152,127 @@ router.post("/project", authorizePA, verifyUserGID, async (req, res) => {
     } catch (err) {
         console.error(err);
         return res.status(500).send({ message: "Internal server error." });
+    }
+});
+
+// POST Route to Generate Document
+router.post("/generate-document/:projectId", authorizePA, checkTeamStatusSubmitted, async (req, res) => {
+    const projectId = parseInt(req.params.projectId);
+    const { start_date, end_date, document_number } = req.body;
+
+    if (!start_date || !end_date || !document_number) {
+        return res.status(400).json({
+            error: true,
+            message: "Missing required fields: start_date, end_date, document_number",
+        });
+    }
+
+    try {
+        // Fetch project data
+        const result = await queryAsync(
+            `SELECT DISTINCT p.id AS project_id, p.project_name, 
+              c.contract_nums, p.pm_id, pm.display_name AS pm_name,
+              t.id AS team_id, tr.id AS tribe_id
+       FROM projects p
+       LEFT JOIN teams t ON p.id = t.project_id
+       LEFT JOIN team_members tm ON t.id = tm.team_id
+       LEFT JOIN users pm ON p.pm_id = pm.id
+       LEFT JOIN (
+         SELECT project_id, GROUP_CONCAT(contract_num) AS contract_nums
+         FROM contracts
+         GROUP BY project_id
+       ) c ON p.id = c.project_id
+       LEFT JOIN tribes tr ON p.id = tr.project_id
+       WHERE p.id = ? LIMIT 1`,
+            [projectId]
+        );
+
+        if (!result.length) {
+            return res.status(404).json({ message: "Project not found" });
+        }
+
+        const project = result[0];
+
+        const teamMembers = await queryAsync(
+            `SELECT r.name AS rank_name, tm.role, u.display_name AS name, r.rank
+       FROM team_members tm
+       JOIN users u ON tm.user_id = u.id
+       JOIN ranks r ON tm.rank = r.rank
+       WHERE tm.team_id = ?
+       ORDER BY r.rank ASC`,
+            [project.team_id]
+        );
+
+        const tribeMembers = await queryAsync(
+            `SELECT r.name AS rank_name, pr.job_group, pr.experience_level, u.display_name AS name, tm.role, r.rank
+       FROM tribe_members tm
+       JOIN users u ON tm.user_id = u.id
+       JOIN ranks r ON tm.rank = r.rank
+       JOIN profiles pr ON u.id = pr.user_id
+       WHERE tm.tribe_id = ?
+       ORDER BY r.rank ASC, pr.job_group ASC, FIELD(pr.experience_level, 'Senior', 'Middle', 'Junior'), u.display_name ASC`,
+            [project.tribe_id]
+        );
+
+        console.log(teamMembers);
+        console.log(tribeMembers);
+
+        const groupedTribeMembers = groupTribeMembers(tribeMembers);
+        console.log("groupedTribeMembers", groupedTribeMembers);
+
+        const result11 = groupTribeMembers(tribeMembers);
+        console.dir(result11, { depth: null });
+
+        const outputFilename = generateOutputFilename(project.project_name);
+        const templatePath = path.join(__dirname, '../var/template.docx');  // template is in ../var/
+        const outputPath = path.join(__dirname, outputFilename);            // output will be in same folder as code
+
+        const formattedContractNumber = formatContractNumbers(project.contract_nums);
+
+        // Generate document
+        await fillDocxTemplate(
+            templatePath, outputPath,
+            {
+                contract_number: formattedContractNumber,
+                start_date,
+                end_date,
+                document_number,
+                team_structure: teamMembers,
+                tribe_structure: groupedTribeMembers,
+            }
+        );
+
+        // Upload to Drive
+        const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+        const uploadResult = await uploadFileToDrive(outputPath, outputFilename, folderId);
+
+        console.log('Uploaded file info:', uploadResult);
+
+        // Optional: Delete the file locally after upload
+        fs.unlinkSync(outputPath);
+
+        await queryAsync(
+            `UPDATE projects SET document_link = ?
+             WHERE id = ?`,
+            [uploadResult.webViewLink, projectId]
+        );
+
+        // Return uploaded file link to client
+        res.status(201).json({
+            message: 'Document generated and uploaded successfully!',
+            driveFile: {
+                id: uploadResult.id,
+                name: uploadResult.name,
+                link: uploadResult.webViewLink,
+            }
+        })
+    } catch (error) {
+        console.error("API Error:", error);
+        res.status(500).json({
+            error: true,
+            message: "Internal server error",
+            details: error.message,
+        });
     }
 });
 
@@ -284,6 +421,217 @@ async function getPMDetails(pm_id) {
             }
         );
     });
+}
+
+function flattenTribeDataLeader(tribeGrouped) {
+    const flatList = [];
+    for (const rank in tribeGrouped) {
+        if (rank.toUpperCase() !== "ANGGOTA") {
+            (tribeGrouped[rank] || []).forEach((leader) => {
+                flatList.push({
+                    rank: rank || "",
+                    role:
+                        (leader.job_group || "") + (leader.role ? ` (${leader.role})` : ""),
+                    name: leader.name || "",
+                });
+            });
+        }
+    }
+    return flatList;
+}
+
+function formatTribeAnggotaTable(anggotaData) {
+    if (!Array.isArray(anggotaData)) return [];
+
+    const tableRows = [];
+
+    anggotaData.forEach((group) => {
+        // Add job group row
+        tableRows.push({
+            isJobGroup: true,
+            job_group: group.job_group.toUpperCase(),
+            level: "",
+            names: ""
+        });
+
+        // Add each experience level row
+        group.levels.forEach((levelStr) => {
+            const [level, namesStr] = levelStr.split(":");
+            const names = namesStr ? namesStr.trim().split(", ").join("\n") : "";
+
+
+
+            tableRows.push({
+                isLevel: true,
+                job_group: "",
+                level: level.trim(),
+                names: names
+            });
+        });
+    });
+
+    return tableRows;
+}
+
+// Helper: Format Tribe Data
+function groupTribeMembers(rows) {
+    const result = {};
+    const membersByJobGroup = {};
+
+    rows.forEach((row) => {
+        if (row.rank_name.toUpperCase() !== "ANGGOTA") {
+            result[row.rank_name] = result[row.rank_name] || [];
+            result[row.rank_name].push({
+                name: row.name,
+                job_group: row.job_group,
+                role: row.role,
+            });
+        } else {
+            if (!membersByJobGroup[row.job_group]) {
+                membersByJobGroup[row.job_group] = {
+                    Senior: [],
+                    Middle: [],
+                    Junior: [],
+                };
+            }
+            if (!membersByJobGroup[row.job_group][row.experience_level]) {
+                membersByJobGroup[row.job_group][row.experience_level] = [];
+            }
+            membersByJobGroup[row.job_group][row.experience_level].push(row.name);
+        }
+    });
+
+    // Now format ANGGOTA the way you want
+    result.ANGGOTA = Object.entries(membersByJobGroup).map(
+        ([jobGroup, levels]) => {
+            const levelStrings = [];
+
+            Object.entries(levels).forEach(([levelName, names]) => {
+                if (names.length > 0) {
+                    const joinedNames = names.join(", ");
+                    levelStrings.push(`${levelName} (${names.length}): ${joinedNames}`);
+                }
+            });
+
+            return {
+                job_group: jobGroup,
+                levels: levelStrings,
+            };
+        }
+    );
+
+    return result;
+}
+
+// Utility function to generate dynamic output filename
+function generateOutputFilename(projectName) {
+    const today = new Date();
+    const day = String(today.getDate()).padStart(2, '0');
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const year = String(today.getFullYear()).slice(-2);
+    const hours = String(today.getHours()).padStart(2, '0');
+    const minutes = String(today.getMinutes()).padStart(2, '0');
+    const seconds = String(today.getSeconds()).padStart(2, '0');
+
+    const formattedDateTime = `${day}${month}${year} ${hours}${minutes}${seconds}`;
+
+    const safeProjectName = projectName.replace(/[\\/:*?"<>|]/g, ''); // Remove forbidden filename characters
+    return `[DRAFT] SK SATGAS - ${safeProjectName} - ${formattedDateTime}.docx`;
+}
+
+function formatContractNumbers(contractNums) {
+    if (!contractNums) return '';
+
+    const numbers = contractNums.split(',').map(num => num.trim()); // split by comma and clean spaces
+
+    if (numbers.length === 1) {
+        return numbers[0];
+    } else if (numbers.length === 2) {
+        return `${numbers[0]} dan ${numbers[1]}`;
+    } else {
+        const allButLast = numbers.slice(0, -1).join(', ');
+        const last = numbers[numbers.length - 1];
+        return `${allButLast}, dan ${last}`;
+    }
+}
+
+const fillDocxTemplate = async (templatePath, outputPath, data) => {
+    try {
+        const content = fs.readFileSync(templatePath, "binary");
+        const zip = new PizZip(content);
+        const doc = new Docxtemplater(zip, {
+            paragraphLoop: true,
+            linebreaks: true,
+        });
+
+        console.dir(data, { depth: null });
+
+        const templateData = {
+            ...data,
+            management_office: Array.isArray(data.team_structure)
+                ? data.team_structure.map((member) => ({
+                    rank: member.rank_name || "",
+                    role: member.role || "",
+                    name: member.name || "",
+                }))
+                : [],
+            tribe_structure_leader: flattenTribeDataLeader(data.tribe_structure),
+            tribe_structure_anggota: formatTribeAnggotaTable(data.tribe_structure.ANGGOTA || [])
+        };
+
+        console.dir(templateData, { depth: null });
+
+        doc.render(templateData);
+
+        const buffer = doc.getZip().generate({ type: "nodebuffer" });
+        fs.writeFileSync(outputPath, buffer);
+
+        return { success: true, outputPath };
+    } catch (error) {
+        console.error("Document generation error:", error);
+        throw error;
+    }
+};
+
+// Function to upload file
+async function uploadFileToDrive(filePath, fileName, folderId) {
+    const fileMetadata = {
+        name: fileName,
+        parents: [folderId], // Google Drive Folder ID where you want to upload
+    };
+
+    const media = {
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // DOCX mimetype
+        body: fs.createReadStream(filePath),
+    };
+
+    const response = await drive.files.create({
+        resource: fileMetadata,
+        media: media,
+        fields: 'id, name, webViewLink',
+    });
+
+    return response.data; // returns { id, name, webViewLink }
+}
+
+async function checkTeamStatusSubmitted(req, res, next) {
+    const projectId = parseInt(req.params.projectId);
+
+    try {
+        const rows = await queryAsync('SELECT team_status FROM projects WHERE id = ?', [projectId]);
+        if (rows.length === 0) {
+            return res.status(404).json({ message: 'Project not found' });
+        }
+
+        const teamStatus = rows[0].team_status; 
+        if (teamStatus !== 'Submitted') {
+            return res.status(403).json({ message: 'Project is not allowed to generate document (team_status is not Submitted).' });
+        }
+        next();
+    } catch (err) {
+        console.error('Error checking team_status:', err);
+        res.status(500).json({ message: 'Internal Server Error' });
+    }
 }
 
 module.exports = router;
