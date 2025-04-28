@@ -136,7 +136,7 @@ router.post("/project", authorizePA, verifyUserGID, async (req, res) => {
 			pm_id,
 			contract_num,
 			contract_value,
-			"",
+			"Initiation",
 			project_size
 		);
 
@@ -149,7 +149,7 @@ router.post("/project", authorizePA, verifyUserGID, async (req, res) => {
 			pm_id: pm_id,
 			contract_nums: contract_num,
 			contract_value: contract_value,
-			project_size: project_size,
+			size: project_size,
 		});
 	} catch (err) {
 		console.error(err);
@@ -226,6 +226,98 @@ async function createProjectAndTeam(
 		throw new Error("Database insertion error");
 	}
 }
+
+router.put(
+	"/project/:projectId",
+	authorizePA,
+	verifyUserGID,
+	async (req, res) => {
+		let project_id = parseInt(req.params.projectId); // ID Project
+		const { id: pm_id } = req.user;
+		const {
+			project_name,
+			project_description,
+			contract_num,
+			contract_value,
+			project_status,
+			project_size,
+		} = req.body;
+
+		// Validate input fields
+		if (
+			!project_name ||
+			!project_description ||
+			!contract_num ||
+			!contract_value ||
+			!project_status ||
+			!project_size ||
+			!project_id
+		) {
+			return res.status(400).send({ message: "Missing required fields." });
+		}
+
+		// Convert contract_num to array if needed
+		let contractNums = [];
+		if (Array.isArray(contract_num)) {
+			contractNums = contract_num;
+		} else if (typeof contract_num === "string") {
+			contractNums = contract_num
+				.split(",")
+				.map((cn) => cn.trim())
+				.filter(Boolean);
+		}
+
+		try {
+			// Update the project
+			const updateResult = await queryAsync(
+				`UPDATE projects 
+                 SET project_name = ?, project_description = ?, contract_value = ?, status = ?, size = ?
+                 WHERE id = ?`,
+				[
+					project_name,
+					project_description,
+					contract_value,
+					project_status,
+					project_size,
+					project_id,
+				]
+			);
+
+			if (updateResult.affectedRows === 0) {
+				return res
+					.status(404)
+					.send({ message: "Project not found or no changes made." });
+			}
+
+			// Update contracts: delete old ones, insert new ones
+			await queryAsync(`DELETE FROM contracts WHERE project_id = ?`, [
+				project_id,
+			]);
+
+			if (contractNums.length > 0) {
+				const contractValues = contractNums.map((cn) => [project_id, cn]);
+				await queryAsync(
+					`INSERT INTO contracts (project_id, contract_num) VALUES ?`,
+					[contractValues]
+				);
+			}
+
+			return res.status(200).send({
+				message: "Project and contracts updated successfully",
+				project_id: project_id,
+				project_name: project_name,
+				project_description: project_description,
+				contract_nums: contract_num,
+				contract_value: contract_value,
+				status: project_status,
+				size: project_size,
+			});
+		} catch (err) {
+			console.error(err);
+			return res.status(500).send({ message: "Internal server error." });
+		}
+	}
+);
 
 // Helper function to promisify queries
 function queryAsync(query, values) {
