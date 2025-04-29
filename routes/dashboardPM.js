@@ -83,7 +83,6 @@ router.get("/dashboard", authorizePM, verifyUserGID, async (req, res) => {
 					[proj.tribe_id]
 				);
 
-<<<<<<< HEAD
         return {
           ...proj,
           team_structure: teamMembers.map(
@@ -284,16 +283,6 @@ router.post("/team/assign", authorizePM, async (req, res) => {
 		const existingPMs = await queryAsync(
 			`SELECT * FROM team_members WHERE team_id = ? AND role = 'Program Manager'`,
 			[team_id]
-=======
-				return {
-					...proj,
-					team_structure: teamMembers.map(
-						(t) => `${t.rank_name} : ${t.members}`
-					),
-					tribe_structure: groupTribeMembers(tribeMembers),
-				};
-			})
->>>>>>> 078692373abf4acd280e52cf328873d3119c593c
 		);
 
 		return res.status(200).send({
